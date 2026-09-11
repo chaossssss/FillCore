@@ -1,0 +1,18 @@
+---
+description: 改 youhou.js 时同步升高版本号
+globs: youhou.js
+alwaysApply: false
+---
+
+# 版本号
+
+改 `youhou.js` 的功能或修 bug 时，同时升高下面两处，且必须相同：
+
+1. 文件头 `@version`
+2. 常量 `VERSION`
+
+菜单标题是 `CMD GRID` + `v` + VERSION，例如 `CMD GRID v1.1.0`。
+
+- 修 bug / 小改：补丁 `1.1.0` → `1.1.1`
+- 新能力：次版本 `1.1.1` → `1.2.0`
+- 纯注释、排版、文档不动版本

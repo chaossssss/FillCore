@@ -1,5 +1,6 @@
 // ==UserScript==
 // @name         FastForm 填写记忆（Element Plus / Vant）
+// @version      1.1.0
 // @match        http://192.168.120.228/*
 // @match        http://192.168.100.156/*
 // @grant        GM_getValue
@@ -11,6 +12,7 @@
 (function () {
   "use strict";
 
+  const VERSION = "1.1.0";
   const MAX_HIST = 30;
   const pageKey = () =>
     "ff_mem_" + location.pathname + location.hash.split("?")[0];
@@ -382,6 +384,9 @@
       clip-path: polygon(50% 0%, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
       box-shadow: 0 0 10px #00e5ff;
       animation: ffpulse 1.1s ease-in-out infinite;
+    }
+    #ff-hud .menu .m-ver {
+      color: #4a8890; letter-spacing: 1px; font-size: 9px;
     }
     #ff-hud .menu .m-tag {
       margin-left: auto; color: #6f6; letter-spacing: 1px; font-size: 9px;
@@ -1891,7 +1896,7 @@
     "</button>" +
     '<div class="menu">' +
     '<div class="m-edge"></div><div class="m-scan"></div>' +
-    '<div class="m-hd"><span class="led"></span>CMD GRID<span class="m-tag">ON</span></div>' +
+    '<div class="m-hd"><span class="led"></span>CMD GRID<span class="m-ver">v' + VERSION + '</span><span class="m-tag">ON</span></div>' +
     '<div class="m-list">' +
     '<button type="button" data-a="save" title="Alt+S"><span class="idx">01</span><span class="lab">保存</span><span class="en">SAVE</span></button>' +
     '<button type="button" data-a="fill" title="Alt+F 直接回填 · Shift+点击勾选"><span class="idx">02</span><span class="lab">回填</span><span class="en">FILL</span></button>' +
