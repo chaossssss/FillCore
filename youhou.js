@@ -1,18 +1,20 @@
 // ==UserScript==
 // @name         FastForm 填写记忆（Element Plus / Vant）
-// @version      1.1.0
+// @version      1.2.0
 // @match        http://192.168.120.228/*
 // @match        http://192.168.100.156/*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
-// @inject-into  page
+// @grant        GM_listValues
+// @grant        GM_addElement
+// @inject-into  content
 // ==/UserScript==
 
-(function () {
+function ffMemApp() {
   "use strict";
 
-  const VERSION = "1.1.0";
+  const VERSION = "1.2.0";
   const MAX_HIST = 30;
   const pageKey = () =>
     "ff_mem_" + location.pathname + location.hash.split("?")[0];
@@ -22,7 +24,16 @@
   const posKey = "ff_mem_bar_pos";
   const openKey = "ff_mem_bar_open";
 
+  function gmPing(op, key, val) {
+    try {
+      window.postMessage({ ns: "ff-mem-gm", op: op, key: key, val: val }, "*");
+    } catch (_) {}
+  }
   function storeGet(key) {
+    try {
+      const mem = window.__FF_MEM_INIT__;
+      if (mem && mem[key] != null && String(mem[key]) !== "") return String(mem[key]);
+    } catch (_) {}
     try {
       if (typeof GM_getValue === "function") {
         const v = GM_getValue(key, "");
@@ -38,6 +49,11 @@
 
   function storeSet(key, val) {
     try {
+      window.__FF_MEM_INIT__ = window.__FF_MEM_INIT__ || {};
+      window.__FF_MEM_INIT__[key] = val;
+    } catch (_) {}
+    gmPing("set", key, val);
+    try {
       if (typeof GM_setValue === "function") GM_setValue(key, val);
     } catch (_) {}
     try {
@@ -46,6 +62,10 @@
   }
 
   function storeDel(key) {
+    try {
+      if (window.__FF_MEM_INIT__) delete window.__FF_MEM_INIT__[key];
+    } catch (_) {}
+    gmPing("del", key);
     try {
       if (typeof GM_deleteValue === "function") GM_deleteValue(key);
     } catch (_) {}
@@ -63,22 +83,42 @@
     }
   }
 
+  function storePieces(key) {
+    const out = [];
+    const push = (v) => {
+      if (v != null && String(v) !== "") out.push(String(v));
+    };
+    try {
+      const mem = window.__FF_MEM_INIT__;
+      if (mem) push(mem[key]);
+    } catch (_) {}
+    try {
+      if (typeof GM_getValue === "function") push(GM_getValue(key, ""));
+    } catch (_) {}
+    try {
+      push(localStorage.getItem(key));
+    } catch (_) {}
+    return out;
+  }
+
   (function migrateShared() {
     const neu = pageKey();
     const old = oldOriginKey();
     const merged = [];
     const seen = new Set();
-    [storeGet(neu + "_hist"), storeGet(old + "_hist")].forEach((raw) => {
-      parseList(raw).forEach((item) => {
-        if (!item || !item.id || seen.has(item.id)) return;
-        seen.add(item.id);
-        merged.push(item);
+    storePieces(neu + "_hist")
+      .concat(storePieces(old + "_hist"))
+      .forEach((raw) => {
+        parseList(raw).forEach((item) => {
+          if (!item || !item.id || seen.has(item.id)) return;
+          seen.add(item.id);
+          merged.push(item);
+        });
       });
-    });
     merged.sort((a, b) => (b.time || 0) - (a.time || 0));
     if (merged.length) storeSet(neu + "_hist", JSON.stringify(merged.slice(0, MAX_HIST)));
     if (!storeGet(neu)) {
-      const latest = storeGet(old);
+      const latest = storePieces(neu).concat(storePieces(old)).find(Boolean);
       if (latest) storeSet(neu, latest);
     }
   })();
@@ -519,6 +559,13 @@
       border: 1px solid #2ee6ff55; padding: 2px 8px; font-size: 11px;
     }
     #ff-mem-hist .cnt i { color: #4a8890; font-style: normal; }
+    #ff-mem-hist .wipe {
+      border: 1px solid #844; background: #1a1010; color: #f88;
+      padding: 2px 8px; cursor: pointer; font: 11px "Microsoft YaHei", sans-serif;
+      letter-spacing: 1px;
+    }
+    #ff-mem-hist .wipe:hover { border-color: #f88; box-shadow: 0 0 8px #f844; }
+    #ff-mem-hist .wipe:disabled { opacity: .35; cursor: default; box-shadow: none; border-color: #533; }
     #ff-mem-hist .x {
       border: 0; background: transparent; color: #7af6ff; cursor: pointer;
       font-size: 15px; line-height: 1; padding: 2px 4px;
@@ -1661,6 +1708,18 @@
     renderHist();
   }
 
+  function clearPageHist() {
+    const n = loadHist().length;
+    if (!n) return toast("这一页没有历史");
+    if (!window.confirm("确定清空本页 " + n + " 条历史？")) return;
+    saveHist([]);
+    storeDel(pageKey());
+    storeDel(oldOriginKey());
+    storeDel(oldOriginKey() + "_hist");
+    renderHist();
+    toast("已清空本页历史");
+  }
+
   function renameItem(id, note) {
     saveHist(loadHist().map((x) => (x.id === id ? { ...x, note } : x)));
   }
@@ -1825,11 +1884,15 @@
     panel.innerHTML =
       '<div class="scan"></div><div class="hd"><span class="mark"></span><span class="ttl">本页档案</span>' +
       '<span class="cnt">' + list.length + "<i>/" + MAX_HIST + "</i></span>" +
+      '<button type="button" class="wipe" title="清空本页历史">清空</button>' +
       '<button type="button" class="x" title="关闭">✕</button></div><div class="bd"></div>';
     panel.querySelector(".x").onclick = () => {
       panel.style.display = "none";
       hud.classList.remove("dock");
     };
+    const wipe = panel.querySelector(".wipe");
+    wipe.disabled = !list.length;
+    wipe.onclick = clearPageHist;
     const bd = panel.querySelector(".bd");
     if (!list.length) {
       bd.innerHTML = '<div class="empty"><div class="hex"></div><p>暂无记录</p><span>填完表点「保存」</span></div>';
@@ -2195,4 +2258,39 @@
   document.documentElement.appendChild(panel);
   document.documentElement.appendChild(pickEl);
   document.documentElement.appendChild(ctx);
+}
+
+(function boot() {
+  if (typeof GM_getValue !== "function") {
+    ffMemApp();
+    return;
+  }
+  const init = {};
+  try {
+    const keys = typeof GM_listValues === "function" ? GM_listValues() : [];
+    for (let i = 0; i < (keys || []).length; i++) {
+      const k = keys[i];
+      if (!k) continue;
+      const v = GM_getValue(k, "");
+      if (v != null && String(v) !== "") init[k] = String(v);
+    }
+  } catch (_) {}
+  window.addEventListener("message", function (e) {
+    if (e.source !== window || !e.data || e.data.ns !== "ff-mem-gm") return;
+    try {
+      if (e.data.op === "set" && e.data.key) GM_setValue(e.data.key, e.data.val);
+      if (e.data.op === "del" && e.data.key) GM_deleteValue(e.data.key);
+    } catch (__) {}
+  });
+  const code = "window.__FF_MEM_INIT__=" + JSON.stringify(init) + ";(" + ffMemApp.toString() + ")();";
+  try {
+    if (typeof GM_addElement === "function") {
+      GM_addElement(document.documentElement, "script", { textContent: code });
+      return;
+    }
+  } catch (_) {}
+  const s = document.createElement("script");
+  s.textContent = code;
+  (document.documentElement || document.head).appendChild(s);
+  s.remove();
 })();
