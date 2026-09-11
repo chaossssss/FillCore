@@ -1,0 +1,1668 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HUD UI Draft</title>
+    <style>
+      :root {
+        --bg-0: #03060d;
+        --bg-1: #07111d;
+        --bg-2: #0b1e31;
+        --line-cyan: #39d8ff;
+        --line-cyan-soft: rgba(57, 216, 255, 0.24);
+        --text-main: #d8f6ff;
+        --text-sub: #78b8cb;
+        --text-dim: #4e7f92;
+        --glow-cyan: 0 0 24px rgba(57, 216, 255, 0.24);
+        --glow-orange: 0 0 24px rgba(255, 153, 84, 0.22);
+        --glow-green: 0 0 24px rgba(113, 255, 166, 0.2);
+        --glow-violet: 0 0 28px rgba(160, 103, 255, 0.22);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+        color: var(--text-main);
+        background:
+          radial-gradient(circle at 15% 20%, rgba(46, 126, 176, 0.18), transparent 24%),
+          radial-gradient(circle at 85% 12%, rgba(0, 221, 255, 0.12), transparent 18%),
+          linear-gradient(180deg, #02050b, #030811 28%, #02050a 100%);
+      }
+
+      body::before,
+      body::after {
+        content: '';
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+      }
+
+      body::before {
+        background:
+          linear-gradient(rgba(76, 222, 255, 0.035) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(76, 222, 255, 0.035) 1px, transparent 1px);
+        background-size: 40px 40px;
+        opacity: 0.65;
+      }
+
+      body::after {
+        background:
+          radial-gradient(circle at 50% 50%, transparent 0 42%, rgba(60, 220, 255, 0.04) 48%, transparent 54%),
+          radial-gradient(circle at 50% 50%, transparent 0 58%, rgba(60, 220, 255, 0.03) 64%, transparent 70%);
+        opacity: 0.5;
+      }
+
+      .page {
+        max-width: 1560px;
+        margin: 0 auto;
+        padding: 42px 28px 64px;
+      }
+
+      .hero {
+        position: relative;
+        overflow: hidden;
+        padding: 32px 34px 28px;
+        border: 1px solid var(--line-cyan-soft);
+        clip-path: polygon(0 18px, 18px 0, calc(100% - 38px) 0, 100% 38px, 100% 100%, 24px 100%, 0 calc(100% - 24px));
+        background:
+          linear-gradient(180deg, rgba(7, 17, 29, 0.88), rgba(5, 10, 18, 0.95)),
+          repeating-linear-gradient(
+            180deg,
+            transparent 0,
+            transparent 5px,
+            rgba(72, 213, 255, 0.04) 6px
+          );
+        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.48), inset 0 0 34px rgba(0, 209, 255, 0.06);
+      }
+
+      .hero::before,
+      .hero::after {
+        content: '';
+        position: absolute;
+        width: 160px;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(90, 232, 255, 0.9), transparent);
+      }
+
+      .hero::before {
+        top: 20px;
+        right: 22px;
+      }
+
+      .hero::after {
+        bottom: 20px;
+        left: 22px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        color: #8edfff;
+        font-size: 12px;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+      }
+
+      .eyebrow::before {
+        content: '';
+        width: 42px;
+        height: 1px;
+        background: linear-gradient(90deg, rgba(57, 216, 255, 0), rgba(57, 216, 255, 0.9));
+      }
+
+      .hero h1 {
+        margin: 16px 0 12px;
+        font-size: 48px;
+        letter-spacing: 2px;
+        line-height: 1.12;
+        text-transform: uppercase;
+      }
+
+      .hero p {
+        margin: 0;
+        max-width: 920px;
+        color: var(--text-sub);
+        font-size: 15px;
+        line-height: 1.9;
+      }
+
+      .notes {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 24px;
+      }
+
+      .note {
+        position: relative;
+        min-height: 96px;
+        padding: 16px;
+        border: 1px solid rgba(57, 216, 255, 0.16);
+        clip-path: polygon(0 12px, 12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%);
+        background: linear-gradient(180deg, rgba(9, 21, 34, 0.72), rgba(4, 9, 16, 0.9));
+      }
+
+      .note strong {
+        display: block;
+        margin-bottom: 8px;
+        color: #96ecff;
+        font-size: 13px;
+        letter-spacing: 1px;
+      }
+
+      .note span {
+        display: block;
+        color: var(--text-dim);
+        font-size: 12px;
+        line-height: 1.75;
+      }
+
+      .section-title {
+        margin: 42px 0 10px;
+        color: #c7f6ff;
+        font-size: 26px;
+        letter-spacing: 1px;
+      }
+
+      .section-desc {
+        margin: 0 0 20px;
+        color: #6fb1c4;
+        font-size: 14px;
+        line-height: 1.8;
+      }
+
+      .showcase {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 22px;
+        margin-bottom: 22px;
+      }
+
+      .panel-card {
+        position: relative;
+        overflow: hidden;
+        padding: 22px;
+        border: 1px solid rgba(57, 216, 255, 0.18);
+        clip-path: polygon(0 20px, 20px 0, calc(100% - 26px) 0, 100% 26px, 100% 100%, 0 100%);
+        background:
+          linear-gradient(180deg, rgba(7, 17, 29, 0.9), rgba(4, 8, 14, 0.96)),
+          repeating-linear-gradient(
+            180deg,
+            transparent 0,
+            transparent 5px,
+            rgba(57, 216, 255, 0.03) 6px
+          );
+        box-shadow: 0 24px 54px rgba(0, 0, 0, 0.44);
+      }
+
+      .panel-card::before {
+        content: '';
+        position: absolute;
+        inset: 10px;
+        border: 1px solid rgba(57, 216, 255, 0.08);
+        clip-path: polygon(0 14px, 14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%);
+        pointer-events: none;
+      }
+
+      .card-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        color: #86e8ff;
+        font-size: 12px;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+      }
+
+      .card-tag::before {
+        content: '';
+        width: 34px;
+        height: 1px;
+        background: linear-gradient(90deg, rgba(57, 216, 255, 0), rgba(57, 216, 255, 0.9));
+      }
+
+      .card-title {
+        margin: 14px 0 10px;
+        font-size: 34px;
+        letter-spacing: 1px;
+      }
+
+      .card-copy {
+        margin: 0;
+        color: var(--text-sub);
+        font-size: 14px;
+        line-height: 1.85;
+      }
+
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 20px;
+      }
+
+      .metric {
+        padding: 14px;
+        border: 1px solid rgba(57, 216, 255, 0.12);
+        background: linear-gradient(180deg, rgba(8, 18, 29, 0.78), rgba(4, 8, 14, 0.94));
+      }
+
+      .metric b {
+        display: block;
+        margin-bottom: 8px;
+        color: #9ceeff;
+        font-size: 22px;
+        font-weight: 700;
+      }
+
+      .metric span {
+        display: block;
+        color: var(--text-dim);
+        font-size: 12px;
+      }
+
+      .board {
+        position: relative;
+        min-height: 760px;
+        border: 1px solid rgba(57, 216, 255, 0.12);
+        background:
+          radial-gradient(circle at 78% 18%, rgba(46, 144, 255, 0.14), transparent 22%),
+          linear-gradient(180deg, rgba(4, 8, 14, 0.95), rgba(2, 5, 10, 0.98));
+        box-shadow: inset 0 0 42px rgba(0, 170, 255, 0.06);
+        overflow: hidden;
+      }
+
+      .board::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(rgba(58, 213, 255, 0.03) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(58, 213, 255, 0.03) 1px, transparent 1px);
+        background-size: 34px 34px;
+        opacity: 0.5;
+      }
+
+      .board::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(90deg, transparent 0 12%, rgba(57, 216, 255, 0.08) 12% 12.2%, transparent 12.2% 88%, rgba(57, 216, 255, 0.08) 88% 88.2%, transparent 88.2%);
+        opacity: 0.5;
+        animation: boardGlow 5.8s ease-in-out infinite;
+      }
+
+      .reticle {
+        position: absolute;
+        right: 54px;
+        top: 36px;
+        width: 180px;
+        height: 180px;
+        border: 1px solid rgba(57, 216, 255, 0.16);
+        border-radius: 50%;
+        box-shadow: var(--glow-cyan);
+        animation: reticlePulse 4.8s ease-in-out infinite;
+      }
+
+      .reticle::before,
+      .reticle::after {
+        content: '';
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        background: rgba(57, 216, 255, 0.24);
+        transform: translate(-50%, -50%);
+      }
+
+      .reticle::before {
+        width: 132px;
+        height: 1px;
+      }
+
+      .reticle::after {
+        width: 1px;
+        height: 132px;
+      }
+
+      .reticle span {
+        position: absolute;
+        inset: 18px;
+        border: 1px dashed rgba(57, 216, 255, 0.18);
+        border-radius: 50%;
+        animation: hudRotateReverse 12s linear infinite;
+      }
+
+      .mock-panel {
+        position: absolute;
+        left: 34px;
+        top: 40px;
+        width: min(780px, calc(100% - 128px));
+        min-height: 468px;
+        border: 1px solid rgba(57, 216, 255, 0.28);
+        clip-path: polygon(0 18px, 18px 0, calc(100% - 32px) 0, 100% 32px, 100% 100%, 0 100%);
+        background:
+          linear-gradient(180deg, rgba(10, 22, 36, 0.94), rgba(5, 12, 20, 0.98)),
+          repeating-linear-gradient(
+            180deg,
+            transparent 0,
+            transparent 4px,
+            rgba(70, 214, 255, 0.04) 5px
+          );
+        box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5), inset 0 0 32px rgba(0, 174, 255, 0.06);
+      }
+
+      .mock-panel::before,
+      .mock-panel::after {
+        content: '';
+        position: absolute;
+        width: 40px;
+        height: 40px;
+        border-color: rgba(106, 229, 255, 0.62);
+        border-style: solid;
+        pointer-events: none;
+      }
+
+      .mock-panel::before {
+        top: 12px;
+        left: 12px;
+        border-width: 2px 0 0 2px;
+      }
+
+      .mock-panel::after {
+        right: 12px;
+        bottom: 12px;
+        border-width: 0 2px 2px 0;
+      }
+
+      .panel-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 16px 18px 14px;
+        border-bottom: 1px solid rgba(57, 216, 255, 0.16);
+        background: linear-gradient(180deg, rgba(12, 30, 48, 0.92), rgba(7, 16, 27, 0.92));
+      }
+
+      .head-left {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+
+      .head-mark {
+        position: relative;
+        width: 24px;
+        height: 24px;
+        border: 1px solid rgba(57, 216, 255, 0.4);
+        transform: rotate(45deg);
+        box-shadow: var(--glow-cyan);
+      }
+
+      .head-mark::before {
+        content: '';
+        position: absolute;
+        inset: 4px;
+        border: 1px solid rgba(126, 232, 255, 0.55);
+      }
+
+      .head-title b {
+        display: block;
+        color: #a6efff;
+        font-size: 15px;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+      }
+
+      .head-title span,
+      .head-side {
+        color: var(--text-sub);
+        font-size: 12px;
+      }
+
+      .head-side {
+        display: flex;
+        gap: 16px;
+      }
+
+      .mock-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      .mock-table th,
+      .mock-table td {
+        padding: 12px 16px;
+        border-bottom: 1px solid rgba(57, 216, 255, 0.08);
+        font-size: 12px;
+        text-align: left;
+      }
+
+      .mock-table th {
+        color: #79dfff;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        background: rgba(8, 18, 28, 0.7);
+      }
+
+      .mock-table td {
+        color: var(--text-main);
+      }
+
+      .mock-table tr:nth-child(even) td {
+        background: rgba(7, 15, 24, 0.5);
+      }
+
+      .cell-soft {
+        color: var(--text-sub);
+      }
+
+      .cell-long {
+        color: #c6f3ff;
+      }
+
+      .input-shell {
+        height: 34px;
+        display: flex;
+        align-items: center;
+        padding: 0 12px;
+        border: 1px solid rgba(57, 216, 255, 0.16);
+        clip-path: polygon(0 8px, 8px 0, 100% 0, 100% 100%, 0 100%);
+        background: linear-gradient(180deg, rgba(7, 16, 25, 0.94), rgba(4, 9, 14, 0.98));
+        color: #d7f8ff;
+      }
+
+      .cell-actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .btn {
+        min-width: 58px;
+        height: 28px;
+        padding: 0 12px;
+        border: 1px solid rgba(57, 216, 255, 0.18);
+        clip-path: polygon(0 7px, 7px 0, 100% 0, 100% 100%, 0 100%);
+        color: var(--text-main);
+        background: linear-gradient(180deg, rgba(12, 32, 48, 0.96), rgba(7, 15, 24, 0.98));
+        letter-spacing: 1px;
+      }
+
+      .btn-danger {
+        border-color: rgba(255, 109, 145, 0.28);
+        color: #ff9bb1;
+        background: linear-gradient(180deg, rgba(42, 14, 24, 0.96), rgba(22, 8, 12, 0.98));
+      }
+
+      .floating {
+        position: absolute;
+        right: 36px;
+        bottom: 34px;
+        width: 184px;
+        height: 252px;
+      }
+
+      .floating .menu::before,
+      .floating .menu::after {
+        content: '';
+        position: absolute;
+        background: rgba(122, 246, 255, 0.72);
+        box-shadow: 0 0 12px rgba(122, 246, 255, 0.38);
+      }
+
+      .floating .menu::before {
+        left: 8px;
+        top: 8px;
+        width: 18px;
+        height: 1px;
+      }
+
+      .floating .menu::after {
+        right: 8px;
+        bottom: 8px;
+        width: 1px;
+        height: 18px;
+      }
+
+      .floating::before {
+        content: '';
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        width: 94px;
+        height: 94px;
+        border: 1px solid rgba(57, 216, 255, 0.2);
+        border-radius: 50%;
+        box-shadow: 0 0 18px rgba(57, 216, 255, 0.16);
+        animation: hudRotate 10s linear infinite;
+      }
+
+      .floating::after {
+        content: '';
+        position: absolute;
+        right: 18px;
+        bottom: 18px;
+        width: 58px;
+        height: 58px;
+        border: 1px dashed rgba(122, 235, 255, 0.24);
+        border-radius: 50%;
+        animation: hudRotateReverse 5.4s linear infinite;
+      }
+
+      .floating .core-wrap {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        width: 96px;
+        height: 96px;
+      }
+
+      .floating .core-wrap::before,
+      .floating .core-wrap::after {
+        content: '';
+        position: absolute;
+        border-radius: 50%;
+        pointer-events: none;
+      }
+
+      .floating .core-wrap::before {
+        inset: 14px;
+        border: 1px solid rgba(122, 246, 255, 0.14);
+        box-shadow: inset 0 0 12px rgba(122, 246, 255, 0.08);
+        animation: hudPulseRing 2.8s ease-in-out infinite;
+      }
+
+      .floating .core-wrap::after {
+        right: 11px;
+        top: 16px;
+        width: 6px;
+        height: 6px;
+        background: #aef9ff;
+        box-shadow: 0 0 14px rgba(122, 246, 255, 0.8);
+        animation: orbitDot 2.2s linear infinite;
+        transform-origin: 12px 26px;
+      }
+
+      .core {
+        position: absolute;
+        right: 16px;
+        bottom: 18px;
+        display: grid;
+        place-items: center;
+        width: 54px;
+        height: 46.8px;
+        border: 1px solid rgba(57, 216, 255, 0.42);
+        clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+        color: #9befff;
+        background:
+          radial-gradient(circle at 50% 28%, rgba(132, 241, 255, 0.24), transparent 34%),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 28%),
+          linear-gradient(180deg, rgba(14, 36, 54, 0.96), rgba(6, 12, 20, 1));
+        box-shadow:
+          0 0 0 1px rgba(77, 232, 255, 0.18),
+          0 0 20px rgba(0, 212, 255, 0.28),
+          inset 0 0 14px rgba(0, 229, 255, 0.12),
+          0 12px 24px rgba(0, 0, 0, 0.48);
+        overflow: hidden;
+        animation: hudPulse 2.8s ease-in-out infinite;
+      }
+
+      .core::before {
+        content: '';
+        position: absolute;
+        inset: 3px;
+        border: 1px solid rgba(129, 233, 255, 0.34);
+        clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+        opacity: 0.8;
+      }
+
+      .core::after {
+        content: '';
+        position: absolute;
+        inset: -40% -10%;
+        background: linear-gradient(115deg, transparent 32%, rgba(140, 244, 255, 0.28) 50%, transparent 68%);
+        transform: translateX(-72%) rotate(12deg);
+        animation: hudSweep 3.2s linear infinite;
+      }
+
+      .core-icon {
+        position: relative;
+        z-index: 1;
+        width: 26px;
+        height: 26px;
+        color: currentColor;
+        filter: drop-shadow(0 0 8px rgba(113, 236, 255, 0.58));
+      }
+
+      .core-icon .visor {
+        stroke: #aef9ff;
+        animation: visorBlink 1.5s ease-in-out infinite;
+      }
+
+      .core-icon * {
+        fill: none;
+        stroke: currentColor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .menu {
+        position: absolute;
+        right: -4px;
+        bottom: 66px;
+        width: 108px;
+        padding: 10px 10px 8px;
+        border: 1px solid rgba(57, 216, 255, 0.24);
+        clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 10px);
+        background:
+          linear-gradient(180deg, rgba(11, 26, 36, 0.96), rgba(5, 11, 16, 0.98)),
+          repeating-linear-gradient(
+            180deg,
+            transparent 0,
+            transparent 6px,
+            rgba(122, 246, 255, 0.04) 7px
+          );
+        box-shadow: 0 22px 44px rgba(0, 0, 0, 0.56), inset 0 0 22px rgba(57, 216, 255, 0.06);
+      }
+
+      .menu-button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 36px;
+        margin-bottom: 6px;
+        border: 1px solid rgba(57, 216, 255, 0.18);
+        clip-path: polygon(8px 0, 100% 0, 100% 100%, 0 100%, 0 8px);
+        color: #d6f6ff;
+        background: linear-gradient(180deg, rgba(13, 34, 50, 0.96), rgba(6, 14, 22, 0.98));
+        letter-spacing: 1px;
+        text-align: center;
+        transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease, background .15s ease;
+        animation: menuIdle 3.6s ease-in-out infinite;
+      }
+
+      .menu-button:nth-of-type(1) {
+        animation-delay: .0s;
+      }
+
+      .menu-button:nth-of-type(2) {
+        animation-delay: .16s;
+      }
+
+      .menu-button:nth-of-type(3) {
+        animation-delay: .32s;
+      }
+
+      .menu-button:nth-of-type(4) {
+        animation-delay: .48s;
+      }
+
+      .menu-button:nth-of-type(5) {
+        animation-delay: .64s;
+      }
+
+      .menu-button:hover {
+        transform: translateX(-2px);
+        border-color: rgba(122, 246, 255, 0.64);
+        background: linear-gradient(180deg, rgba(18, 52, 72, 0.98), rgba(8, 21, 31, 0.98));
+        box-shadow: 0 0 14px rgba(0, 229, 255, 0.28), inset 0 0 10px rgba(0, 229, 255, 0.08);
+      }
+
+      .menu-button:last-of-type {
+        margin-bottom: 6px;
+      }
+
+      .menu-hint {
+        color: #5fa7bc;
+        font-size: 10px;
+        text-align: center;
+      }
+
+      .toast {
+        position: absolute;
+        left: 36px;
+        bottom: 34px;
+        display: inline-flex;
+        align-items: center;
+        min-height: 40px;
+        padding: 0 18px;
+        border: 1px solid rgba(57, 216, 255, 0.26);
+        clip-path: polygon(10px 0, 100% 0, 100% 100%, 0 100%, 0 10px);
+        color: #d8f6ff;
+        background:
+          linear-gradient(180deg, rgba(10, 23, 36, 0.96), rgba(5, 12, 18, 0.98)),
+          repeating-linear-gradient(180deg, transparent 0 6px, rgba(122, 246, 255, 0.03) 7px);
+        box-shadow: 0 18px 32px rgba(0, 0, 0, 0.46), var(--glow-cyan);
+        overflow: hidden;
+      }
+
+      .toast::before {
+        content: '';
+        width: 8px;
+        height: 8px;
+        margin-right: 10px;
+        border-radius: 50%;
+        background: #8ef7ff;
+        box-shadow: 0 0 12px rgba(122, 246, 255, 0.82);
+        animation: toastBlink 1.4s ease-in-out infinite;
+      }
+
+      .toast::after {
+        content: '';
+        position: absolute;
+        inset: -40% -8%;
+        background: linear-gradient(112deg, transparent 35%, rgba(142, 247, 255, 0.16) 50%, transparent 65%);
+        transform: translateX(-90%);
+        animation: hudSweep 4.2s linear infinite;
+      }
+
+      .variants {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .variant {
+        --accent: #39d8ff;
+        --accent-soft: rgba(57, 216, 255, 0.24);
+        --accent-glow: var(--glow-cyan);
+        --panel-top: rgba(10, 22, 35, 0.95);
+        --panel-bottom: rgba(5, 12, 18, 0.98);
+        --button-top: rgba(14, 35, 52, 0.96);
+        --button-bottom: rgba(7, 14, 22, 0.98);
+        overflow: hidden;
+      }
+
+      .variant-iron {
+        --accent: #ff9a57;
+        --accent-soft: rgba(255, 154, 87, 0.28);
+        --accent-glow: var(--glow-orange);
+        --panel-top: rgba(28, 15, 8, 0.96);
+        --panel-bottom: rgba(12, 7, 5, 0.98);
+        --button-top: rgba(58, 28, 14, 0.96);
+        --button-bottom: rgba(24, 12, 8, 0.98);
+      }
+
+      .variant-cyber {
+        --accent: #74ff9e;
+        --accent-soft: rgba(116, 255, 158, 0.24);
+        --accent-glow: var(--glow-green);
+        --panel-top: rgba(7, 18, 9, 0.96);
+        --panel-bottom: rgba(4, 9, 5, 0.98);
+        --button-top: rgba(14, 35, 17, 0.96);
+        --button-bottom: rgba(8, 18, 10, 0.98);
+      }
+
+      .variant-neon {
+        --accent: #a067ff;
+        --accent-soft: rgba(160, 103, 255, 0.26);
+        --accent-glow: var(--glow-violet);
+        --panel-top: rgba(18, 12, 38, 0.96);
+        --panel-bottom: rgba(9, 6, 21, 0.98);
+        --button-top: rgba(36, 20, 68, 0.96);
+        --button-bottom: rgba(18, 11, 34, 0.98);
+      }
+
+      .variant-head {
+        margin-bottom: 16px;
+      }
+
+      .variant-head strong {
+        display: block;
+        margin-bottom: 8px;
+        color: var(--accent);
+        font-size: 20px;
+        letter-spacing: 1px;
+      }
+
+      .variant-head span {
+        display: block;
+        color: var(--text-sub);
+        font-size: 13px;
+        line-height: 1.8;
+      }
+
+      .variant-board {
+        position: relative;
+        min-height: 520px;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        background:
+          radial-gradient(circle at 84% 16%, var(--accent-soft), transparent 20%),
+          linear-gradient(180deg, rgba(3, 7, 12, 0.98), rgba(2, 5, 8, 1));
+        overflow: hidden;
+      }
+
+      .variant-board::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+        background-size: 28px 28px;
+        animation: boardGlow 5.8s ease-in-out infinite;
+      }
+
+      .variant-target {
+        position: absolute;
+        right: 20px;
+        top: 20px;
+        width: 104px;
+        height: 104px;
+        border: 1px solid var(--accent-soft);
+        border-radius: 50%;
+        box-shadow: var(--accent-glow);
+        animation: reticlePulse 5.2s ease-in-out infinite;
+      }
+
+      .variant-target::before,
+      .variant-target::after {
+        content: '';
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        background: var(--accent-soft);
+        transform: translate(-50%, -50%);
+      }
+
+      .variant-target::before {
+        width: 70px;
+        height: 1px;
+      }
+
+      .variant-target::after {
+        width: 1px;
+        height: 70px;
+      }
+
+      .variant-panel {
+        position: absolute;
+        left: 18px;
+        top: 18px;
+        right: 86px;
+        min-height: 316px;
+        border: 1px solid var(--accent-soft);
+        clip-path: polygon(0 14px, 14px 0, calc(100% - 20px) 0, 100% 20px, 100% 100%, 0 100%);
+        background:
+          linear-gradient(180deg, var(--panel-top), var(--panel-bottom)),
+          repeating-linear-gradient(
+            180deg,
+            transparent 0,
+            transparent 4px,
+            rgba(255, 255, 255, 0.03) 5px
+          );
+        box-shadow: 0 20px 42px rgba(0, 0, 0, 0.54), var(--accent-glow);
+      }
+
+      .variant-panel-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 14px 16px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      }
+
+      .variant-title {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--accent);
+        font-size: 13px;
+        letter-spacing: 1.4px;
+        text-transform: uppercase;
+      }
+
+      .variant-title i {
+        width: 12px;
+        height: 12px;
+        border: 1px solid var(--accent);
+        transform: rotate(45deg);
+        box-shadow: var(--accent-glow);
+      }
+
+      .variant-meta {
+        color: var(--text-sub);
+        font-size: 12px;
+      }
+
+      .variant-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      .variant-table th,
+      .variant-table td {
+        padding: 11px 14px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        font-size: 12px;
+        text-align: left;
+      }
+
+      .variant-table th {
+        color: var(--accent);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+
+      .variant-table td {
+        color: var(--text-main);
+      }
+
+      .variant-soft {
+        color: var(--text-sub);
+      }
+
+      .variant-long {
+        color: #d7f3ff;
+      }
+
+      .variant-actions {
+        display: flex;
+        gap: 6px;
+      }
+
+      .variant-btn {
+        min-width: 52px;
+        height: 28px;
+        padding: 0 10px;
+        border: 1px solid var(--accent-soft);
+        clip-path: polygon(0 7px, 7px 0, 100% 0, 100% 100%, 0 100%);
+        color: var(--text-main);
+        background: linear-gradient(180deg, var(--button-top), var(--button-bottom));
+      }
+
+      .variant-btn-danger {
+        color: #ff9ab2;
+      }
+
+      .variant-floating {
+        position: absolute;
+        right: 18px;
+        bottom: 18px;
+        width: 138px;
+        height: 216px;
+      }
+
+      .variant-menu {
+        position: absolute;
+        right: 0;
+        bottom: 72px;
+        width: 116px;
+        padding: 8px;
+        border: 1px solid var(--accent-soft);
+        clip-path: polygon(0 10px, 10px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%);
+        background:
+          linear-gradient(180deg, rgba(9, 16, 25, 0.98), rgba(5, 9, 14, 1)),
+          repeating-linear-gradient(
+            180deg,
+            transparent 0,
+            transparent 4px,
+            rgba(255, 255, 255, 0.03) 5px
+          );
+        box-shadow: 0 16px 32px rgba(0, 0, 0, 0.56), var(--accent-glow);
+      }
+
+      .variant-menu-item {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 34px;
+        margin-bottom: 6px;
+        border: 1px solid var(--accent-soft);
+        clip-path: polygon(0 7px, 7px 0, 100% 0, 100% 100%, 0 100%);
+        color: var(--text-main);
+        background: linear-gradient(180deg, var(--button-top), var(--button-bottom));
+        font-size: 12px;
+        letter-spacing: 1px;
+        animation: menuIdle 3.8s ease-in-out infinite;
+      }
+
+      .variant-menu-item:nth-of-type(1) {
+        animation-delay: .0s;
+      }
+
+      .variant-menu-item:nth-of-type(2) {
+        animation-delay: .16s;
+      }
+
+      .variant-menu-item:nth-of-type(3) {
+        animation-delay: .32s;
+      }
+
+      .variant-menu-item:nth-of-type(4) {
+        animation-delay: .48s;
+      }
+
+      .variant-menu-item:nth-of-type(5) {
+        animation-delay: .64s;
+      }
+
+      .variant-menu-item:last-of-type {
+        margin-bottom: 0;
+      }
+
+      .variant-core-ring {
+        position: absolute;
+        right: 2px;
+        bottom: 2px;
+        width: 76px;
+        height: 76px;
+        border: 1px solid var(--accent-soft);
+        border-radius: 50%;
+        box-shadow: var(--accent-glow);
+        animation: hudRotate 8s linear infinite;
+      }
+
+      .variant-core {
+        position: absolute;
+        right: 8px;
+        bottom: 10px;
+        display: grid;
+        place-items: center;
+        width: 56px;
+        height: 48.5px;
+        border: 1px solid var(--accent-soft);
+        clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+        color: var(--accent);
+        background:
+          radial-gradient(circle at 50% 28%, color-mix(in srgb, var(--accent) 28%, transparent), transparent 30%),
+          linear-gradient(180deg, var(--button-top), var(--button-bottom));
+        box-shadow: 0 14px 28px rgba(0, 0, 0, 0.6), var(--accent-glow);
+        overflow: hidden;
+        animation: hudPulse 3s ease-in-out infinite;
+      }
+
+      .variant-core::before {
+        content: '';
+        position: absolute;
+        inset: 4px;
+        border: 1px solid color-mix(in srgb, var(--accent) 66%, white 12%);
+        clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+        opacity: 0.75;
+      }
+
+      .variant-core::after {
+        content: '';
+        position: absolute;
+        inset: -40% -10%;
+        background: linear-gradient(115deg, transparent 32%, color-mix(in srgb, var(--accent) 36%, white 16%) 50%, transparent 68%);
+        transform: translateX(-72%) rotate(12deg);
+        animation: hudSweep 3.4s linear infinite;
+      }
+
+      .variant-core .core-icon {
+        position: relative;
+        z-index: 1;
+        width: 24px;
+        height: 24px;
+      }
+
+      .variant-toast {
+        position: absolute;
+        left: 18px;
+        bottom: 18px;
+        padding: 10px 14px;
+        border: 1px solid var(--accent-soft);
+        clip-path: polygon(0 9px, 9px 0, 100% 0, 100% 100%, 0 100%);
+        color: var(--text-main);
+        background: linear-gradient(180deg, rgba(10, 18, 28, 0.96), rgba(5, 9, 14, 1));
+        box-shadow: var(--accent-glow);
+        font-size: 12px;
+        overflow: hidden;
+      }
+
+      .variant-toast::before {
+        content: '';
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        margin-right: 10px;
+        border-radius: 50%;
+        background: currentColor;
+        box-shadow: 0 0 10px currentColor;
+        animation: toastBlink 1.6s ease-in-out infinite;
+      }
+
+      @keyframes hudRotate {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @keyframes hudRotateReverse {
+        to {
+          transform: rotate(-360deg);
+        }
+      }
+
+      @keyframes hudPulse {
+        0%,
+        100% {
+          transform: translateY(0) scale(1);
+          filter: brightness(1);
+        }
+        50% {
+          transform: translateY(-1px) scale(1.03);
+          filter: brightness(1.12);
+        }
+      }
+
+      @keyframes hudSweep {
+        0% {
+          transform: translateX(-72%) rotate(12deg);
+        }
+        100% {
+          transform: translateX(72%) rotate(12deg);
+        }
+      }
+
+      @keyframes visorBlink {
+        0%,
+        100% {
+          opacity: 0.66;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
+
+      @keyframes hudPulseRing {
+        0%,
+        100% {
+          opacity: .36;
+          transform: scale(1);
+        }
+        50% {
+          opacity: .72;
+          transform: scale(1.08);
+        }
+      }
+
+      @keyframes orbitDot {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @keyframes menuIdle {
+        0%,
+        100% {
+          box-shadow: inset 0 0 0 rgba(0, 229, 255, 0);
+        }
+        50% {
+          box-shadow: inset 0 0 12px rgba(0, 229, 255, 0.08), 0 0 10px rgba(0, 212, 255, 0.08);
+        }
+      }
+
+      @keyframes toastBlink {
+        0%,
+        100% {
+          opacity: .55;
+          transform: scale(.9);
+        }
+        50% {
+          opacity: 1;
+          transform: scale(1.08);
+        }
+      }
+
+      @keyframes reticlePulse {
+        0%,
+        100% {
+          opacity: .72;
+          transform: scale(1);
+        }
+        50% {
+          opacity: 1;
+          transform: scale(1.03);
+        }
+      }
+
+      @keyframes boardGlow {
+        0%,
+        100% {
+          opacity: .38;
+        }
+        50% {
+          opacity: .62;
+        }
+      }
+
+      @media (max-width: 1280px) {
+        .notes,
+        .metrics,
+        .variants {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .showcase {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 820px) {
+        .page {
+          padding: 20px 14px 36px;
+        }
+
+        .hero h1 {
+          font-size: 34px;
+        }
+
+        .notes,
+        .metrics,
+        .variants {
+          grid-template-columns: 1fr;
+        }
+
+        .mock-panel {
+          right: 18px;
+          width: auto;
+        }
+
+        .floating {
+          transform: scale(0.9);
+          transform-origin: right bottom;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="hero">
+        <span class="eyebrow">Tactical Interface Redesign</span>
+        <h1>HUD / TERMINAL / NEON CONTROL PANEL</h1>
+        <p>
+          这次不走普通圆角卡片风，直接切成硬边科技控制台。重点是切角边框、能量轨道、瞄准环、扫描线、
+          分区刻度和更像系统控制界面的排版。下面第一张是我重画的主稿，后面三张是钢铁侠、黑客终端、蓝紫霓虹三套更狠的方向。
+        </p>
+        <div class="notes">
+          <div class="note">
+            <strong>面板语言</strong>
+            <span>全部改成硬边切角，去掉软卡片和“网页组件感”，更像设备 HUD。</span>
+          </div>
+          <div class="note">
+            <strong>视觉锚点</strong>
+            <span>加入瞄准环、角标、刻度线、轨道圈，让画面先有“系统感”再谈颜色。</span>
+          </div>
+          <div class="note">
+            <strong>按钮方式</strong>
+            <span>按钮保留文字居中，但外形切成模块片，避免看起来像普通按钮组。</span>
+          </div>
+          <div class="note">
+            <strong>主按钮符号</strong>
+            <span>主按钮现在按你 JS 里的版本统一成青蓝六边形核心，图标也是同一套 AI 线稿。</span>
+          </div>
+        </div>
+      </section>
+
+      <h2 class="section-title">主稿</h2>
+      <p class="section-desc">
+        这一版是我认为最接近“有科技感”的基础款，适合直接落到油猴脚本里。它不会太花，但已经明显脱离普通网页面板。
+      </p>
+
+      <section class="showcase">
+        <section class="panel-card">
+          <span class="card-tag">Primary System HUD</span>
+          <h3 class="card-title">更硬核的控制台感</h3>
+          <p class="card-copy">
+            历史面板不是表格卡片，而是一个带角标、状态刻度和扫描纹理的数据舱。悬浮菜单不再像弹出菜单，而像一个独立战术模块。
+          </p>
+          <div class="metrics">
+            <div class="metric">
+              <b>52px</b>
+              <span>主按钮尺寸，保留操作性但更像启动核心</span>
+            </div>
+            <div class="metric">
+              <b>BOT</b>
+              <span>主按钮识别符号与当前脚本版本保持一致，方便后面直接映射到正式 UI</span>
+            </div>
+            <div class="metric">
+              <b>HUD</b>
+              <span>切角边框、轨道环、扫描线组成主视觉</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel-card">
+          <div class="board">
+            <div class="reticle"><span></span></div>
+
+            <section class="mock-panel">
+              <header class="panel-head">
+                <div class="head-left">
+                  <span class="head-mark"></span>
+                  <div class="head-title">
+                    <b>MEMORY CONTROL</b>
+                    <span>PAGE SNAPSHOT / LOCAL CACHE</span>
+                  </div>
+                </div>
+                <div class="head-side">
+                  <span>NODE 03</span>
+                  <span>STATUS READY</span>
+                </div>
+              </header>
+
+              <table class="mock-table">
+                <thead>
+                  <tr>
+                    <th>备注</th>
+                    <th>时间</th>
+                    <th>字段</th>
+                    <th>摘要</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><div class="input-shell">门诊挂号单</div></td>
+                    <td class="cell-soft">09-11 11:32</td>
+                    <td>18</td>
+                    <td class="cell-long">name=张三；dept=内科；doctor=李医生；date=09-11</td>
+                    <td>
+                      <div class="cell-actions">
+                        <button class="btn">回填</button>
+                        <button class="btn">复制</button>
+                        <button class="btn btn-danger">删除</button>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><div class="input-shell">体检预约</div></td>
+                    <td class="cell-soft">09-11 10:08</td>
+                    <td>12</td>
+                    <td class="cell-long">mobile=138****1234；gender=男；date=09-12</td>
+                    <td>
+                      <div class="cell-actions">
+                        <button class="btn">回填</button>
+                        <button class="btn">复制</button>
+                        <button class="btn btn-danger">删除</button>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><div class="input-shell">导入模板 A</div></td>
+                    <td class="cell-soft">09-10 18:46</td>
+                    <td>21</td>
+                    <td class="cell-long">city=杭州；address=西湖区；idNo=3301************</td>
+                    <td>
+                      <div class="cell-actions">
+                        <button class="btn">回填</button>
+                        <button class="btn">复制</button>
+                        <button class="btn btn-danger">删除</button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+
+            <aside class="floating">
+              <div class="menu">
+                <div class="menu-button">保存</div>
+                <div class="menu-button">回填</div>
+                <div class="menu-button">历史</div>
+                <div class="menu-button">复制</div>
+                <div class="menu-button">导入</div>
+                <div class="menu-hint">拖动 · 双击复位</div>
+              </div>
+              <div class="core-wrap">
+                <div class="core">
+                  <svg class="core-icon" viewBox="0 0 32 32" aria-hidden="true">
+                    <path d="M16 5.6 L25.6 11.1 V20.9 L16 26.4 L6.4 20.9 V11.1 Z" stroke-width="1.5"></path>
+                    <path d="M11 12.6c0-2.8 2.2-5.1 5-5.1s5 2.3 5 5.1v.9c1.2.4 2 1.5 2 2.7v1.6a3.2 3.2 0 0 1-3.2 3.2h-7.6A3.2 3.2 0 0 1 9 17.8v-1.6c0-1.2.8-2.3 2-2.7z" stroke-width="1.45"></path>
+                    <path class="visor" d="M11.9 14.2c2.6-.7 5.6-.7 8.2 0" stroke-width="1.7"></path>
+                    <path d="M12.8 18h2.1M17.1 18h2.1" stroke-width="1.9"></path>
+                    <path d="M13.4 20.7h5.2" stroke-width="1.35"></path>
+                  </svg>
+                </div>
+              </div>
+            </aside>
+
+            <div class="toast">cache write complete / 18 fields synced</div>
+          </div>
+        </section>
+      </section>
+
+      <h2 class="section-title">三套方向</h2>
+      <p class="section-desc">
+        下面这三套不再是“换个颜色”，而是分别给了不同的系统气质。你只要挑一个方向，我就继续把它落回 `youhou.js`。
+      </p>
+
+      <section class="variants">
+        <section class="panel-card variant variant-iron">
+          <header class="variant-head">
+            <strong>钢铁侠 HUD</strong>
+            <span>橙金能源舱、装甲边框、战术界面语义更强，适合想要“电影装备感”的路线。</span>
+          </header>
+          <div class="variant-board">
+            <div class="variant-target"></div>
+            <section class="variant-panel">
+              <div class="variant-panel-top">
+                <div class="variant-title"><i></i><span>ARC REACTOR GRID</span></div>
+                <span class="variant-meta">ARMOR 03</span>
+              </div>
+              <table class="variant-table">
+                <thead>
+                  <tr>
+                    <th>记录</th>
+                    <th>时间</th>
+                    <th>字段</th>
+                    <th>摘要</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>门诊挂号单</td>
+                    <td class="variant-soft">09-11 11:32</td>
+                    <td>18</td>
+                    <td class="variant-long">dept=内科；doctor=李医生；date=09-11</td>
+                    <td>
+                      <div class="variant-actions">
+                        <button class="variant-btn">回填</button>
+                        <button class="variant-btn">复制</button>
+                        <button class="variant-btn variant-btn-danger">删除</button>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>体检预约</td>
+                    <td class="variant-soft">09-11 10:08</td>
+                    <td>12</td>
+                    <td class="variant-long">mobile=138****1234；gender=男</td>
+                    <td>
+                      <div class="variant-actions">
+                        <button class="variant-btn">回填</button>
+                        <button class="variant-btn">复制</button>
+                        <button class="variant-btn variant-btn-danger">删除</button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+            <aside class="variant-floating">
+              <div class="variant-menu">
+                <div class="variant-menu-item">保存</div>
+                <div class="variant-menu-item">回填</div>
+                <div class="variant-menu-item">历史</div>
+                <div class="variant-menu-item">复制</div>
+                <div class="variant-menu-item">导入</div>
+              </div>
+              <div class="variant-core-ring"></div>
+              <div class="variant-core">
+                <svg class="core-icon" viewBox="0 0 32 32" aria-hidden="true">
+                  <path d="M16 5.6 L25.6 11.1 V20.9 L16 26.4 L6.4 20.9 V11.1 Z" stroke-width="1.5"></path>
+                  <path d="M11 12.6c0-2.8 2.2-5.1 5-5.1s5 2.3 5 5.1v.9c1.2.4 2 1.5 2 2.7v1.6a3.2 3.2 0 0 1-3.2 3.2h-7.6A3.2 3.2 0 0 1 9 17.8v-1.6c0-1.2.8-2.3 2-2.7z" stroke-width="1.45"></path>
+                  <path class="visor" d="M11.9 14.2c2.6-.7 5.6-.7 8.2 0" stroke-width="1.7"></path>
+                  <path d="M12.8 18h2.1M17.1 18h2.1" stroke-width="1.9"></path>
+                  <path d="M13.4 20.7h5.2" stroke-width="1.35"></path>
+                </svg>
+              </div>
+            </aside>
+            <div class="variant-toast">energy cell synced / 18 items</div>
+          </div>
+        </section>
+
+        <section class="panel-card variant variant-cyber">
+          <header class="variant-head">
+            <strong>黑客终端 / 赛博面板</strong>
+            <span>黑绿冷终端、更像命令控制台，视觉更狠更“攻”，适合工具感压过装饰感。</span>
+          </header>
+          <div class="variant-board">
+            <div class="variant-target"></div>
+            <section class="variant-panel">
+              <div class="variant-panel-top">
+                <div class="variant-title"><i></i><span>MEMORY BUFFER</span></div>
+                <span class="variant-meta">ROOT NODE</span>
+              </div>
+              <table class="variant-table">
+                <thead>
+                  <tr>
+                    <th>记录</th>
+                    <th>时间</th>
+                    <th>字段</th>
+                    <th>摘要</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>门诊挂号单</td>
+                    <td class="variant-soft">09-11 11:32</td>
+                    <td>18</td>
+                    <td class="variant-long">name=张三；dept=内科；doctor=李医生</td>
+                    <td>
+                      <div class="variant-actions">
+                        <button class="variant-btn">回填</button>
+                        <button class="variant-btn">复制</button>
+                        <button class="variant-btn variant-btn-danger">删除</button>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>导入模板 A</td>
+                    <td class="variant-soft">09-10 18:46</td>
+                    <td>21</td>
+                    <td class="variant-long">city=杭州；address=西湖区；id=3301********</td>
+                    <td>
+                      <div class="variant-actions">
+                        <button class="variant-btn">回填</button>
+                        <button class="variant-btn">复制</button>
+                        <button class="variant-btn variant-btn-danger">删除</button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+            <aside class="variant-floating">
+              <div class="variant-menu">
+                <div class="variant-menu-item">保存</div>
+                <div class="variant-menu-item">回填</div>
+                <div class="variant-menu-item">历史</div>
+                <div class="variant-menu-item">复制</div>
+                <div class="variant-menu-item">导入</div>
+              </div>
+              <div class="variant-core-ring"></div>
+              <div class="variant-core">
+                <svg class="core-icon" viewBox="0 0 32 32" aria-hidden="true">
+                  <path d="M16 5.6 L25.6 11.1 V20.9 L16 26.4 L6.4 20.9 V11.1 Z" stroke-width="1.5"></path>
+                  <path d="M11 12.6c0-2.8 2.2-5.1 5-5.1s5 2.3 5 5.1v.9c1.2.4 2 1.5 2 2.7v1.6a3.2 3.2 0 0 1-3.2 3.2h-7.6A3.2 3.2 0 0 1 9 17.8v-1.6c0-1.2.8-2.3 2-2.7z" stroke-width="1.45"></path>
+                  <path class="visor" d="M11.9 14.2c2.6-.7 5.6-.7 8.2 0" stroke-width="1.7"></path>
+                  <path d="M12.8 18h2.1M17.1 18h2.1" stroke-width="1.9"></path>
+                  <path d="M13.4 20.7h5.2" stroke-width="1.35"></path>
+                </svg>
+              </div>
+            </aside>
+            <div class="variant-toast">buffer write success / cache online</div>
+          </div>
+        </section>
+
+        <section class="panel-card variant variant-neon">
+          <header class="variant-head">
+            <strong>蓝紫霓虹未来感</strong>
+            <span>蓝紫能量边缘、舞台级 glow、更有潮流未来感，适合你想要明显视觉攻击性的版本。</span>
+          </header>
+          <div class="variant-board">
+            <div class="variant-target"></div>
+            <section class="variant-panel">
+              <div class="variant-panel-top">
+                <div class="variant-title"><i></i><span>NEON CONTROL GRID</span></div>
+                <span class="variant-meta">NX LAYER</span>
+              </div>
+              <table class="variant-table">
+                <thead>
+                  <tr>
+                    <th>记录</th>
+                    <th>时间</th>
+                    <th>字段</th>
+                    <th>摘要</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>门诊挂号单</td>
+                    <td class="variant-soft">09-11 11:32</td>
+                    <td>18</td>
+                    <td class="variant-long">dept=内科；doctor=李医生；date=09-11</td>
+                    <td>
+                      <div class="variant-actions">
+                        <button class="variant-btn">回填</button>
+                        <button class="variant-btn">复制</button>
+                        <button class="variant-btn variant-btn-danger">删除</button>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>体检预约</td>
+                    <td class="variant-soft">09-11 10:08</td>
+                    <td>12</td>
+                    <td class="variant-long">gender=男；mobile=138****1234；date=09-12</td>
+                    <td>
+                      <div class="variant-actions">
+                        <button class="variant-btn">回填</button>
+                        <button class="variant-btn">复制</button>
+                        <button class="variant-btn variant-btn-danger">删除</button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+            <aside class="variant-floating">
+              <div class="variant-menu">
+                <div class="variant-menu-item">保存</div>
+                <div class="variant-menu-item">回填</div>
+                <div class="variant-menu-item">历史</div>
+                <div class="variant-menu-item">复制</div>
+                <div class="variant-menu-item">导入</div>
+              </div>
+              <div class="variant-core-ring"></div>
+              <div class="variant-core">
+                <svg class="core-icon" viewBox="0 0 32 32" aria-hidden="true">
+                  <path d="M16 5.6 L25.6 11.1 V20.9 L16 26.4 L6.4 20.9 V11.1 Z" stroke-width="1.5"></path>
+                  <path d="M11 12.6c0-2.8 2.2-5.1 5-5.1s5 2.3 5 5.1v.9c1.2.4 2 1.5 2 2.7v1.6a3.2 3.2 0 0 1-3.2 3.2h-7.6A3.2 3.2 0 0 1 9 17.8v-1.6c0-1.2.8-2.3 2-2.7z" stroke-width="1.45"></path>
+                  <path class="visor" d="M11.9 14.2c2.6-.7 5.6-.7 8.2 0" stroke-width="1.7"></path>
+                  <path d="M12.8 18h2.1M17.1 18h2.1" stroke-width="1.9"></path>
+                  <path d="M13.4 20.7h5.2" stroke-width="1.35"></path>
+                </svg>
+              </div>
+            </aside>
+            <div class="variant-toast">neon sync ready / 18 entries online</div>
+          </div>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>
