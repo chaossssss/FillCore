@@ -1171,8 +1171,16 @@
     const s = textOf(meta).toLowerCase();
     if (t === "password" || /密码/.test(s) || /\bpassword\b/.test(s)) return "";
     if (/验证码|captcha|sms.?code|checkcode/.test(s)) return "";
-    if (t === "file" || t === "image" || t === "geo-location") return "";
+    if (t === "file" || t === "image") return "";
     if (/上传/.test(s) || /\b(upload|oss)\b/.test(s)) return "";
+    if (/ipv6|ip.?v6/.test(s)) return "ipv6";
+    if (/ipv4|ip.?v4|ip地址|ipaddress/.test(s) || (/\bip\b/.test(s) && /地址|address/.test(s))) return "ipv4";
+    if (/\bmac\b|mac地址|mac.?addr/.test(s)) return "mac";
+    if (/经度|longitude|\blng\b|\blon\b/.test(s) && !/纬度|latitude/.test(s)) return "lng";
+    if (/纬度|latitude|\blat\b/.test(s) && !/经度|longitude/.test(s)) return "lat";
+    if (/架设高度|erectheight/.test(s)) return "height";
+    if (/保存天数|录像天数/.test(s)) return "days";
+    if (t === "geo-location") return "";
     if (t === "tel") return "phone";
     if (t === "email") return "email";
     if (t === "date") return "date";
@@ -1198,7 +1206,16 @@
     if (/身份证|idcard|id.?card/.test(s)) return "idcard";
     if (/金额|价格|费用|amount|price|money/.test(s)) return "amount";
     if (/备注|说明|描述|remark|comment|\bnote\b|reason/.test(s)) return "remark";
-    if (/地址|address/.test(s) && !/\bip\b|email|mac/.test(s)) return "address";
+    if (/地址|address/.test(s) && !/ipv?[46]|ip地址|ipaddress|email|\bmac\b/.test(s)) return "address";
+    if (/国标编码|国际编码|standardcode|gb.?28181/.test(s)) return "gbcode";
+    if (/备案|recordcode/.test(s)) return "recordcode";
+    if (/设备编码|摄像机编码|cameracode/.test(s)) return "devicecode";
+    if (/设备名称|devicename/.test(s)) return "devicename";
+    if (/设备型号|型号|devicemodel/.test(s)) return "model";
+    if (/点位俗称|点位名称|pointname/.test(s)) return "site";
+    if (/补光/.test(s)) return "filllight";
+    if (/行政区域|行政区划|所属区域/.test(s)) return "region";
+    if (/路口|路段/.test(s)) return "road";
     if (/公司|企业名称|单位名称|company/.test(s)) return "company";
     if (/日期/.test(s)) return "date";
     if (/时间/.test(s)) return "datetime";
@@ -1244,6 +1261,62 @@
 
   const SURNAMES = "赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张";
   const GIVEN = "伟芳娜敏静丽强磊洋勇艳杰娟涛超秀英霞平刚桂英";
+  const HN_SPOTS = [
+    { area: "硖石街道", road: "海洲西路", cross: "工人路", lng: 120.4189, lat: 30.5255 },
+    { area: "硖石街道", road: "西山路", cross: "水月亭路", lng: 120.4102, lat: 30.5318 },
+    { area: "海洲街道", road: "水月亭路", cross: "海宁大道", lng: 120.4306, lat: 30.5324 },
+    { area: "海昌街道", road: "文苑路", cross: "钱江路", lng: 120.4048, lat: 30.5196 },
+    { area: "马桥街道", road: "马桥路", cross: "洛塘路", lng: 120.4547, lat: 30.5082 },
+    { area: "盐官镇", road: "观潮路", cross: "建设路", lng: 120.5558, lat: 30.3934 },
+    { area: "长安镇", road: "农发大道", cross: "长安路", lng: 120.2686, lat: 30.4561 },
+    { area: "许村镇", road: "皮革城大道", cross: "许巷路", lng: 120.3759, lat: 30.5116 },
+    { area: "斜桥镇", road: "斜桥大道", cross: "建设路", lng: 120.4887, lat: 30.4823 },
+    { area: "周王庙镇", road: "建设路", cross: "周王路", lng: 120.3508, lat: 30.4479 },
+    { area: "丁桥镇", road: "丁桥大道", cross: "人民路", lng: 120.6284, lat: 30.4452 },
+    { area: "袁花镇", road: "人民路", cross: "袁花大道", lng: 120.7156, lat: 30.4781 },
+    { area: "黄湾镇", road: "黄湾大道", cross: "盐黄线", lng: 120.6318, lat: 30.3726 },
+  ];
+  const DEVICE_MODELS = [
+    "DS-2CD3346FWD-I",
+    "DS-2CD3T47G1-L",
+    "DS-2CD2385FWD-I",
+    "DH-IPC-HFW4433M-I2",
+    "DH-IPC-HDW2433T-A",
+    "IPC-B120-M",
+  ];
+  let hnCtx = null;
+  function resetHainingCtx() {
+    hnCtx = null;
+  }
+  function hainingCtx() {
+    if (!hnCtx) {
+      const spot = pick(HN_SPOTS);
+      const no = ri(1, 188);
+      const seq = String(ri(1, 999999)).padStart(6, "0");
+      const jitter = () => (Math.random() - 0.5) * 0.006;
+      hnCtx = {
+        address: "浙江省嘉兴市海宁市" + spot.area + spot.road + no + "号",
+        region: "浙江省嘉兴市海宁市" + spot.area,
+        road: spot.area + spot.road + "与" + spot.cross + "交叉口",
+        site: spot.road + "监控点",
+        deviceName: "海宁市" + spot.area + spot.road + "摄像机",
+        gbCode: "33048100111320" + seq,
+        deviceCode: "HN" + ymd(new Date()).replace(/-/g, "") + seq.slice(-4),
+        recordCode: "BA330481" + ymd(new Date()).replace(/-/g, "").slice(2) + seq.slice(-4),
+        model: pick(DEVICE_MODELS),
+        fillLight: pick(["红外补光", "白光补光", "无补光", "激光补光"]),
+        lng: (spot.lng + jitter()).toFixed(6),
+        lat: (spot.lat + jitter()).toFixed(6),
+      };
+    }
+    return hnCtx;
+  }
+  function hex2() {
+    return ri(0, 255).toString(16).padStart(2, "0").toUpperCase();
+  }
+  function hex4() {
+    return ri(0, 65535).toString(16).padStart(4, "0");
+  }
 
   function mockPhone() {
     return pick(["138", "139", "150", "158", "186", "188", "199"]) + String(ri(10000000, 99999999));
@@ -1256,7 +1329,7 @@
     );
   }
   function mockIdCard() {
-    const area = "110101";
+    const area = "330481";
     const birth = String(ri(1978, 2000)) + pad(ri(1, 12)) + pad(ri(1, 28));
     const seq = String(ri(0, 999)).padStart(3, "0");
     const base = area + birth + seq;
@@ -1265,6 +1338,15 @@
     let sum = 0;
     for (let i = 0; i < 17; i++) sum += Number(base[i]) * w[i];
     return base + c[sum % 11];
+  }
+  function mockIpv4() {
+    return "10." + ri(10, 88) + "." + ri(0, 255) + "." + ri(1, 254);
+  }
+  function mockIpv6() {
+    return "fd12:" + hex4() + ":" + hex4() + "::" + hex4();
+  }
+  function mockMac() {
+    return [hex2(), hex2(), hex2(), hex2(), hex2(), hex2()].join(":");
   }
   function optVal(o) {
     if (o == null || typeof o !== "object") return o;
@@ -1304,8 +1386,24 @@
     if (kind === "email") return "test_" + ri(1000, 9999) + "@example.com";
     if (kind === "idcard") return mockIdCard();
     if (kind === "remark") return "测试备注，无需处理";
-    if (kind === "address") return "北京市朝阳区测试路" + ri(1, 99) + "号";
-    if (kind === "company") return "测试科技有限公司";
+    if (kind === "address") return hainingCtx().address;
+    if (kind === "region") return hainingCtx().region;
+    if (kind === "road") return hainingCtx().road;
+    if (kind === "site") return hainingCtx().site;
+    if (kind === "devicename") return hainingCtx().deviceName;
+    if (kind === "gbcode") return hainingCtx().gbCode;
+    if (kind === "devicecode") return hainingCtx().deviceCode;
+    if (kind === "recordcode") return hainingCtx().recordCode;
+    if (kind === "model") return hainingCtx().model;
+    if (kind === "filllight") return hainingCtx().fillLight;
+    if (kind === "lng") return hainingCtx().lng;
+    if (kind === "lat") return hainingCtx().lat;
+    if (kind === "height") return (ri(45, 80) / 10).toFixed(1);
+    if (kind === "days") return pick([15, 30, 60, 90]);
+    if (kind === "ipv4") return mockIpv4();
+    if (kind === "ipv6") return mockIpv6();
+    if (kind === "mac") return mockMac();
+    if (kind === "company") return "海宁测试科技有限公司";
     if (kind === "amount") return (ri(100, 99999) / 100).toFixed(2);
     if (kind === "number") return ri(1, 99);
     if (kind === "switch") return true;
@@ -1350,6 +1448,7 @@
   }
 
   function buildMock(metas, current) {
+    resetHainingCtx();
     const data = {};
     for (const meta of metas) {
       if (!isEmpty(current[meta.name])) continue;
@@ -1362,6 +1461,7 @@
   }
 
   function planVirtual() {
+    resetHainingCtx();
     const forms = currentForms();
     let skip = 0;
     const planned = forms.map((f) => {
@@ -2000,6 +2100,7 @@
       label: field.label,
       type: field.host?.type,
     };
+    resetHainingCtx();
     const kind = inferKind(meta);
     if (!kind) return toast("这个字段没法虚拟");
     const v = mockValue(kind, meta);
