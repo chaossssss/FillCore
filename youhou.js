@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         FastForm 填写记忆（Element Plus / Vant）
-// @version      1.2.0
+// @version      1.2.3
 // @match        http://192.168.120.228/*
 // @match        http://192.168.100.156/*
 // @grant        GM_getValue
@@ -14,7 +14,7 @@
 function ffMemApp() {
   "use strict";
 
-  const VERSION = "1.2.0";
+  const VERSION = "1.2.3";
   const MAX_HIST = 30;
   const pageKey = () =>
     "ff_mem_" + location.pathname + location.hash.split("?")[0];
@@ -22,7 +22,6 @@ function ffMemApp() {
     "ff_mem_" + location.origin + location.pathname + location.hash.split("?")[0];
   const histKey = () => pageKey() + "_hist";
   const posKey = "ff_mem_bar_pos";
-  const openKey = "ff_mem_bar_open";
 
   function gmPing(op, key, val) {
     try {
@@ -1129,6 +1128,32 @@ function ffMemApp() {
     return [];
   }
 
+  function preferType(next, prev) {
+    const rank = (t) => {
+      const x = String(t || "").toLowerCase().replace(/[-_]/g, "");
+      if (!x || x === "text" || x === "search" || x === "button" || x === "hidden") return 0;
+      if (x === "textarea" || x === "number" || x === "tel" || x === "email" || x === "digit") return 1;
+      return 2;
+    };
+    return rank(next) >= rank(prev) ? next || prev : prev || next;
+  }
+
+  function dateEditorType(root) {
+    if (!root || !root.querySelector) return "";
+    const ed = root.querySelector(".el-date-editor, .el-time-picker");
+    const cls = String((ed && ed.className) || "");
+    if (/datetimerange/.test(cls)) return "datetimerange";
+    if (/daterange/.test(cls)) return "daterange";
+    if (/monthrange/.test(cls)) return "monthrange";
+    if (/datetime/.test(cls)) return "datetime";
+    if (/--month/.test(cls)) return "month";
+    if (/--year/.test(cls)) return "year";
+    if (/--week/.test(cls)) return "week";
+    if (/--time/.test(cls) || /\bel-time-picker\b/.test(cls)) return "time";
+    if (/--date/.test(cls) || /\bel-date-editor\b/.test(cls)) return "date";
+    return "";
+  }
+
   function walkSchema(schema, out) {
     for (const item of unwrapArr(schema)) {
       if (!item || typeof item !== "object") continue;
@@ -1155,11 +1180,14 @@ function ffMemApp() {
       const prev = map.get(m.name) || {};
       map.set(m.name, {
         name: m.name,
-        type: m.type || prev.type,
+        type: preferType(m.type, prev.type),
         label: m.label || prev.label,
         placeholder: m.placeholder || prev.placeholder,
         options: m.options || prev.options,
         valueFormat: m.valueFormat || m["value-format"] || prev.valueFormat,
+        isRange: m.isRange || m["is-range"] || prev.isRange,
+        startPlaceholder: m.startPlaceholder || m["start-placeholder"] || prev.startPlaceholder,
+        endPlaceholder: m.endPlaceholder || m["end-placeholder"] || prev.endPlaceholder,
       });
     };
     for (const inst of allVueInstances()) {
@@ -1175,6 +1203,9 @@ function ffMemApp() {
           placeholder: p.placeholder,
           options: p.options,
           valueFormat: p.valueFormat || p["value-format"],
+          isRange: p.isRange || p["is-range"],
+          startPlaceholder: p.startPlaceholder || p["start-placeholder"],
+          endPlaceholder: p.endPlaceholder || p["end-placeholder"],
         });
       }
       schemaOf(inst).forEach(add);
@@ -1187,7 +1218,13 @@ function ffMemApp() {
       const control = item.querySelector("input, textarea, select");
       const rawId = control?.name || control?.id || "";
       const name = junkField(rawId) ? vueFieldName(item) : rawId;
-      if (name && !junkField(name)) add({ name, label, type: control?.tagName === "TEXTAREA" ? "textarea" : control?.type, placeholder: control?.placeholder });
+      if (name && !junkField(name))
+        add({
+          name,
+          label,
+          type: dateEditorType(item) || (control?.tagName === "TEXTAREA" ? "textarea" : control?.type),
+          placeholder: control?.placeholder,
+        });
     });
     return [...map.values()];
   }
@@ -1204,7 +1241,7 @@ function ffMemApp() {
       ).trim();
       metas.push({
         name: el.name || (!junkField(el.id) && el.id) || "idx_" + i,
-        type: el.tagName === "TEXTAREA" ? "textarea" : el.type,
+        type: dateEditorType(wrap) || (el.tagName === "TEXTAREA" ? "textarea" : el.type),
         label,
         placeholder: el.placeholder,
       });
@@ -1213,13 +1250,13 @@ function ffMemApp() {
   }
 
   function textOf(meta) {
-    return [meta.label, meta.name, meta.placeholder, meta.type]
+    return [meta.label, meta.name, meta.placeholder, meta.startPlaceholder, meta.endPlaceholder, meta.type]
       .filter((x) => x != null && x !== "")
       .join(" ");
   }
 
   function inferKind(meta) {
-    const t = String(meta.type || "").toLowerCase();
+    const t = String(meta.type || "").toLowerCase().replace(/[-_]/g, "");
     const s = textOf(meta).toLowerCase();
     if (t === "password" || /密码/.test(s) || /\bpassword\b/.test(s)) return "";
     if (/验证码|captcha|sms.?code|checkcode/.test(s)) return "";
@@ -1233,6 +1270,16 @@ function ffMemApp() {
     if (/架设高度|erectheight/.test(s)) return "height";
     if (/保存天数|录像天数/.test(s)) return "days";
     if (t === "geo-location") return "";
+    const isRange =
+      !!meta.isRange ||
+      !!meta["is-range"] ||
+      /range/.test(t) ||
+      /区间|起止|(日期|时间)\s*范围|范围\s*(日期|时间)|开始日期|结束日期/.test(s);
+    if (isRange) {
+      if (/month/.test(t)) return "monthrange";
+      if (t === "datetimerange" || /日期时间/.test(s)) return "datetimerange";
+      return "daterange";
+    }
     if (t === "tel") return "phone";
     if (t === "email") return "email";
     if (t === "date") return "date";
@@ -1303,12 +1350,34 @@ function ffMemApp() {
     if (f === "X") return Math.floor(d.getTime() / 1000);
     if (!f) return ymd(d);
     return String(f)
-      .replace(/YYYY/g, d.getFullYear())
+      .replace(/YYYY|yyyy/g, String(d.getFullYear()))
       .replace(/MM/g, pad(d.getMonth() + 1))
-      .replace(/DD/g, pad(d.getDate()))
+      .replace(/DD|dd/g, pad(d.getDate()))
       .replace(/HH/g, pad(d.getHours()))
       .replace(/mm/g, pad(d.getMinutes()))
       .replace(/ss/g, pad(d.getSeconds()));
+  }
+  function rangeVal(v) {
+    if (v instanceof Date) return v.getTime();
+    if (typeof v === "number") return v;
+    const t = Date.parse(String(v).replace(/-/g, "/"));
+    return Number.isFinite(t) ? t : String(v);
+  }
+  function orderedRange(a, b) {
+    const va = rangeVal(a);
+    const vb = rangeVal(b);
+    if (typeof va === "number" && typeof vb === "number") return va <= vb ? [a, b] : [b, a];
+    return String(a) <= String(b) ? [a, b] : [b, a];
+  }
+  function mockRange(meta, withTime) {
+    const pair = datePair();
+    const start = pair.start.getTime() <= pair.end.getTime() ? pair.start : pair.end;
+    const end = pair.start.getTime() <= pair.end.getTime() ? pair.end : pair.start;
+    if (withTime) {
+      const f = meta.valueFormat || meta["value-format"] || "YYYY-MM-DD HH:mm:ss";
+      return orderedRange(fmt({ valueFormat: f }, start), fmt({ valueFormat: f }, end));
+    }
+    return orderedRange(fmt(meta, start), fmt(meta, end));
   }
 
   const SURNAMES = "赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张";
@@ -1337,8 +1406,26 @@ function ffMemApp() {
     "IPC-B120-M",
   ];
   let hnCtx = null;
+  let dateCtx = null;
   function resetHainingCtx() {
     hnCtx = null;
+    dateCtx = null;
+  }
+  function datePair() {
+    if (!dateCtx) {
+      const now = new Date();
+      const start = addDays(now, -ri(0, 20));
+      const end = addDays(start, ri(180, 400));
+      dateCtx = { start, end, now };
+    }
+    return dateCtx;
+  }
+  function dateForMeta(meta, fallback) {
+    const s = textOf(meta).toLowerCase();
+    const pair = datePair();
+    if (/开始/.test(s) && !/结束/.test(s)) return pair.start;
+    if (/结束/.test(s) && !/开始/.test(s)) return pair.end;
+    return fallback;
   }
   function hainingCtx() {
     if (!hnCtx) {
@@ -1461,25 +1548,21 @@ function ffMemApp() {
     if (kind === "switch") return true;
     if (kind === "rate") return 4;
     if (kind === "slider") return 50;
-    if (kind === "date") return fmt(meta, now);
+    if (kind === "date") return fmt(meta, dateForMeta(meta, now));
     if (kind === "datetime") {
       const f = meta.valueFormat || meta["value-format"] || "YYYY-MM-DD HH:mm:ss";
-      return fmt({ valueFormat: f }, now);
+      return fmt({ valueFormat: f }, dateForMeta(meta, now));
     }
     if (kind === "time") return hms(now);
     if (kind === "month") return now.getFullYear() + "-" + pad(now.getMonth() + 1);
     if (kind === "year") return String(now.getFullYear());
-    if (kind === "daterange") return [fmt(meta, addDays(now, -6)), fmt(meta, now)];
-    if (kind === "datetimerange") {
-      const f = meta.valueFormat || "YYYY-MM-DD HH:mm:ss";
-      return [fmt({ valueFormat: f }, addDays(now, -6)), fmt({ valueFormat: f }, now)];
-    }
+    if (kind === "daterange") return mockRange(meta, false);
+    if (kind === "datetimerange") return mockRange(meta, true);
     if (kind === "monthrange") {
-      const a = addDays(now, -31);
-      return [
-        a.getFullYear() + "-" + pad(a.getMonth() + 1),
-        now.getFullYear() + "-" + pad(now.getMonth() + 1),
-      ];
+      const pair = datePair();
+      const a = pair.start.getFullYear() + "-" + pad(pair.start.getMonth() + 1);
+      const b = pair.end.getFullYear() + "-" + pad(pair.end.getMonth() + 1);
+      return a <= b ? [a, b] : [b, a];
     }
     if (kind === "option") {
       if (String(meta.type).toLowerCase() === "cascader") return firstCascade(meta);
@@ -1494,7 +1577,11 @@ function ffMemApp() {
   function isEmpty(v) {
     if (v == null) return true;
     if (typeof v === "string") return v.trim() === "";
-    if (Array.isArray(v)) return v.length === 0;
+    if (Array.isArray(v)) {
+      if (v.length === 0) return true;
+      if (v.length === 2 && v[0] != null && v[1] != null && rangeVal(v[0]) > rangeVal(v[1])) return true;
+      return false;
+    }
     if (typeof v === "object") return !Object.keys(v).length;
     return false;
   }
@@ -2028,12 +2115,7 @@ function ffMemApp() {
 
   function setOpen(v) {
     hud.classList.toggle("open", v);
-    storeSet(openKey, v ? "1" : "0");
     morphGlyph(v, false);
-  }
-  if (storeGet(openKey) === "1") {
-    hud.classList.add("open");
-    morphGlyph(true, true);
   }
 
   function clamp(left, top) {
