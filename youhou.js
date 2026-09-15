@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         FastForm 填写记忆（Element Plus / Vant）
-// @version      1.7.0
+// @version      1.8.0
 // @match        http://192.168.120.228/*
 // @match        http://192.168.100.156/*
 // @grant        GM_getValue
@@ -15,16 +15,19 @@
 function ffMemApp() {
   "use strict";
 
-  const VERSION = "1.7.0";
+  const VERSION = "1.8.0";
   const MAX_HIST = 30;
   const MAX_IDS = 36;
   const MAX_NET = 40;
   const MAX_NET_BODY = 80000;
+  const MAX_REC = 12;
+  const MAX_REC_STEPS = 160;
+  const MAX_REC_MOVES = 700;
   const pageKey = () =>
     "ff_mem_" + location.pathname + location.hash.split("?")[0];
   const oldOriginKey = () =>
     "ff_mem_" + location.origin + location.pathname + location.hash.split("?")[0];
-  const histKey = () => pageKey() + "_hist";
+  const recKey = () => pageKey() + "_rec";
   const posKey = "ff_mem_bar_pos";
   const idKey = "ff_mem_ids";
   const idGroupKey = "ff_mem_id_group";
@@ -546,7 +549,8 @@ function ffMemApp() {
   const css = document.createElement("style");
   css.textContent = `
     #ff-hud, #ff-hud *, #ff-mem-hist, #ff-mem-hist *,
-    #ff-mem-pick, #ff-mem-pick *, #ff-mem-ctx, #ff-mem-ctx * { box-sizing: border-box; }
+    #ff-mem-pick, #ff-mem-pick *, #ff-mem-ctx, #ff-mem-ctx *,
+    #ff-mem-cursor, #ff-mem-cursor * { box-sizing: border-box; }
     #ff-hud {
       position: fixed; z-index: 2147483647;
       font-family: "Microsoft YaHei", Consolas, sans-serif;
@@ -571,6 +575,25 @@ function ffMemApp() {
       50% {
         box-shadow: 0 0 0 1px #b8ffd0, 0 0 16px #3dff8acc, 0 0 28px #22ff7a77, inset 0 0 12px #3dff8a55;
       }
+    }
+    @keyframes ffredcore {
+      0%, 100% {
+        box-shadow: 0 0 0 1px #8a1e1e66, 0 0 6px #ff6b6b22, inset 0 0 8px #140606cc;
+      }
+      50% {
+        box-shadow: 0 0 0 1px #ffb8b8, 0 0 16px #ff6b6bcc, 0 0 28px #ff6b6b77, inset 0 0 12px #ff6b6b55;
+      }
+    }
+    #ff-hud.rec .core {
+      background: radial-gradient(circle at 50% 48%, #2a1010 0%, #061018 72%);
+      color: #ff8a8a;
+      animation: ffredcore 1s ease-in-out infinite;
+    }
+    #ff-hud.rec .core .outer { stroke: #ff6b6b; }
+    #ff-hud.rec .core .inner { fill: #a03030; stroke: #ff6b6b; animation: none; }
+    #ff-hud.rec.open .core {
+      background: radial-gradient(circle at 50% 46%, #4a1c1c 0 12%, #281018 48%, #061018 100%);
+      animation: ffredcore 1s ease-in-out infinite;
     }
     #ff-hud.open .core {
       background: radial-gradient(circle at 50% 46%, #1e4a5c 0 12%, #143848 48%, #061018 100%);
@@ -779,6 +802,7 @@ function ffMemApp() {
     #ff-hud.open .menu button:nth-child(7) { animation-delay: .64s; }
     #ff-hud.open .menu button:nth-child(8) { animation-delay: .70s; }
     #ff-hud.open .menu button:nth-child(9) { animation-delay: .76s; }
+    #ff-hud.open .menu button:nth-child(10) { animation-delay: .82s; }
     @keyframes ffin {
       from { opacity: 0; filter: blur(8px); }
       to { opacity: 1; filter: none; }
@@ -817,12 +841,20 @@ function ffMemApp() {
     #ff-hud .menu button[data-a="net"]:hover { background: linear-gradient(90deg, #10283a, #071820); }
     #ff-hud .menu button[data-a="net"]::before { background: #4de8ff; }
     #ff-hud .menu button[data-a="net"] .idx { color: #4de8ff; }
+    #ff-hud .menu button[data-a="rec"]:hover { background: linear-gradient(90deg, #3a1018, #071820); }
+    #ff-hud .menu button[data-a="rec"]::before { background: #ff6b6b; }
+    #ff-hud .menu button[data-a="rec"] .idx { color: #ff6b6b; }
+    #ff-hud.rec .menu button[data-a="rec"] {
+      border-color: #ff6b6b; box-shadow: 0 0 12px #ff6b6b44;
+    }
+    #ff-hud.rec .m-tag { color: #ff6b6b; text-shadow: 0 0 8px #ff6b6b; }
+    #ff-hud.play .m-tag { color: #ffd36a; text-shadow: 0 0 8px #ffd36a; }
     #ff-hud .hint {
       position: relative; z-index: 3;
       font: 9px Consolas, monospace; color: #4a8890; letter-spacing: 1px;
       text-align: center; padding: 4px 8px 8px; opacity: 0;
     }
-    #ff-hud.open .hint { animation: ffin .3s ease .82s forwards; }
+    #ff-hud.open .hint { animation: ffin .3s ease .88s forwards; }
     #ff-mem-toast {
       position: fixed; left: 50%; bottom: 80px; transform: translateX(-50%) translateY(8px);
       z-index: 2147483647; padding: 8px 14px; font: 12px "Microsoft YaHei", sans-serif;
@@ -1120,6 +1152,16 @@ function ffMemApp() {
     }
     #ff-mem-ctx button:hover { background: #0c2834; color: #7af6ff; }
     #ff-mem-ctx button[disabled] { color: #4a8890; cursor: default; }
+    #ff-mem-cursor {
+      display: none; position: fixed; z-index: 2147483646;
+      width: 16px; height: 16px; margin: -2px 0 0 -2px;
+      pointer-events: none;
+      border: 2px solid #ff6b6b;
+      border-radius: 50% 50% 50% 0;
+      transform: rotate(-45deg);
+      background: #ff6b6baa;
+      box-shadow: 0 0 12px #ff6b6b99;
+    }
   `;
   document.documentElement.appendChild(css);
 
@@ -2438,6 +2480,14 @@ function ffMemApp() {
 
   let histQuery = "";
   let idGroupFilter = storeGet(idGroupKey) || "*";
+  let recOn = false;
+  let recPlaying = false;
+  let recSteps = [];
+  let recMoves = [];
+  let recT0 = 0;
+  let recMoveAt = 0;
+  let recFillT = {};
+  let recPage = "";
 
   function histHaystack(item) {
     const chunks = [item.note || ""];
@@ -2501,6 +2551,14 @@ function ffMemApp() {
 
   function saveHist(list) {
     storeSet(histKey(), JSON.stringify(list.slice(0, MAX_HIST)));
+  }
+
+  function loadRecs() {
+    return parseList(storeGet(recKey()));
+  }
+
+  function saveRecs(list) {
+    storeSet(recKey(), JSON.stringify(list.slice(0, MAX_REC)));
   }
 
   function addHistory(payload, note) {
@@ -2849,6 +2907,10 @@ function ffMemApp() {
     togglePanel("net");
   }
 
+  function toggleRecPanel() {
+    togglePanel("rec");
+  }
+
   function togglePanel(mode) {
     const open = panel.style.display !== "block" || panelMode !== mode;
     if (!open) {
@@ -2863,6 +2925,7 @@ function ffMemApp() {
     hud.classList.add("dock");
     if (mode === "id") renderIds();
     else if (mode === "net") renderNet();
+    else if (mode === "rec") renderRec();
     else renderHist();
     placePanel();
     if (mode === "hist" || mode === "net") panel.querySelector(".find input")?.focus();
@@ -3060,6 +3123,482 @@ function ffMemApp() {
         renderNetList(false);
         requestAnimationFrame(placePanel);
       });
+      bd.appendChild(row);
+    });
+  }
+
+  function recNow() {
+    return Date.now() - recT0;
+  }
+
+  function recEsc(s) {
+    const t = String(s || "");
+    if (typeof CSS !== "undefined" && CSS.escape) return CSS.escape(t);
+    return t.replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+  }
+
+  function recClickable(el) {
+    if (!(el instanceof Element)) return el;
+    return (
+      el.closest(
+        "button, a, li, .el-button, .el-link, .el-dropdown-menu__item, .el-select-dropdown__item, .el-cascader-node, [role=button]"
+      ) || el
+    );
+  }
+
+  function recPath(el) {
+    const parts = [];
+    let cur = el;
+    while (cur && cur.nodeType === 1 && parts.length < 7) {
+      if (cur.id && !/^el-id-/.test(cur.id) && !/\s/.test(cur.id)) {
+        parts.unshift("#" + recEsc(cur.id));
+        break;
+      }
+      const tag = cur.tagName.toLowerCase();
+      if (tag === "html") break;
+      let i = 1;
+      let sib = cur;
+      while ((sib = sib.previousElementSibling)) {
+        if (sib.tagName === cur.tagName) i++;
+      }
+      const good = [...cur.classList].filter((c) => /^(el-|van-|btn)/.test(c)).slice(0, 2);
+      let sel = tag;
+      if (good.length) sel += "." + good.map(recEsc).join(".");
+      sel += ":nth-of-type(" + i + ")";
+      parts.unshift(sel);
+      if (tag === "body") break;
+      cur = cur.parentElement;
+    }
+    return parts.join(">");
+  }
+
+  function recFp(el, e) {
+    if (!(el instanceof Element)) return null;
+    const hit = recClickable(el);
+    const field = fieldFromEvent({ target: hit });
+    const text = ownText(hit).slice(0, 36);
+    const cls = [...hit.classList].filter((c) => c && !/^is-/.test(c) && c.length < 36).slice(0, 3);
+    return {
+      kind: "click",
+      t: recNow(),
+      tag: hit.tagName,
+      id: hit.id && !/^el-id-/.test(hit.id) ? hit.id : "",
+      name: (field && field.name) || hit.getAttribute("name") || "",
+      label: (field && field.label) || "",
+      text,
+      cls: cls.join("."),
+      type: hit.getAttribute("type") || "",
+      path: recPath(hit),
+      x: e.clientX,
+      y: e.clientY,
+    };
+  }
+
+  function recPaint() {
+    if (!hud) return;
+    hud.classList.toggle("rec", recOn);
+    hud.classList.toggle("play", recPlaying);
+    const tag = hud.querySelector(".m-tag");
+    if (tag) {
+      if (recPlaying) tag.textContent = "PLAY";
+      else if (recOn) tag.textContent = "REC " + recSteps.length;
+      else tag.textContent = "ON";
+    }
+    const recBtn = hud.querySelector('[data-a="rec"] .lab');
+    if (recBtn) recBtn.textContent = recOn ? "停止" : "录制";
+  }
+
+  function recReadField(field) {
+    const forms = currentForms();
+    const f = forms.find((x) => x.el && field.host && x.el.contains(field.host)) || forms[0];
+    if (f) {
+      const data = f.get() || {};
+      if (Object.prototype.hasOwnProperty.call(data, field.name)) return data[field.name];
+    }
+    const control = field.host && field.host.matches && field.host.matches("input, textarea, select")
+      ? field.host
+      : field.host && field.host.querySelector
+        ? field.host.querySelector("input, textarea, select")
+        : null;
+    if (!control) return "";
+    if (control.type === "checkbox") return !!control.checked;
+    return control.value;
+  }
+
+  function recPushStep(step) {
+    if (!recOn || recPlaying || !step) return;
+    if (recSteps.length >= MAX_REC_STEPS) return;
+    recSteps.push(step);
+    recPaint();
+  }
+
+  function recPushFill(field) {
+    if (!recOn || recPlaying || !field || junkField(field.name)) return;
+    let value;
+    try {
+      value = recReadField(field);
+    } catch (_) {
+      return;
+    }
+    const last = recSteps[recSteps.length - 1];
+    if (last && last.kind === "fill" && last.name === field.name) {
+      last.value = value;
+      last.t = recNow();
+      last.label = field.label || last.label;
+      recPaint();
+      return;
+    }
+    recPushStep({
+      kind: "fill",
+      t: recNow(),
+      name: field.name,
+      label: field.label || field.name,
+      value,
+    });
+  }
+
+  function recFind(fp) {
+    if (!fp) return null;
+    const ok = (el) => el instanceof Element && !isHudTree(el);
+    if (fp.id) {
+      const el = document.getElementById(fp.id);
+      if (ok(el)) return recClickable(el);
+    }
+    if (fp.path) {
+      try {
+        const el = document.querySelector(fp.path);
+        if (ok(el)) return recClickable(el);
+      } catch (_) {}
+    }
+    if (fp.name) {
+      try {
+        const el = document.querySelector('[name="' + recEsc(fp.name) + '"]');
+        if (ok(el)) return recClickable(el);
+      } catch (_) {}
+    }
+    if (fp.text) {
+      const overlay = pickTopOverlay();
+      const nodes = [
+        ...document.querySelectorAll(
+          "button, a, li, span, p, .el-button, .el-link, .el-dropdown-menu__item, .el-select-dropdown__item, .el-cascader-node, [role=button]"
+        ),
+      ];
+      const hits = nodes.filter((el) => {
+        if (!ok(el) || !isVisibleEl(el)) return false;
+        const t = ownText(el);
+        return t === fp.text || (fp.text.length >= 2 && t.indexOf(fp.text) === 0);
+      });
+      const pool = overlay ? hits.filter((el) => overlay.contains(el)) : [];
+      const use = pool.length ? pool : hits;
+      if (use.length === 1) return recClickable(use[0]);
+      if (fp.tag) {
+        const tagged = use.find((el) => el.tagName === fp.tag);
+        if (tagged) return recClickable(tagged);
+      }
+      if (use[0]) return recClickable(use[0]);
+    }
+    if (typeof fp.x === "number" && typeof fp.y === "number") {
+      const el = document.elementFromPoint(fp.x, fp.y);
+      if (ok(el)) return recClickable(el);
+    }
+    return null;
+  }
+
+  function recCursor() {
+    let el = document.getElementById("ff-mem-cursor");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "ff-mem-cursor";
+      document.documentElement.appendChild(el);
+    }
+    return el;
+  }
+
+  function recMoveCursor(x, y) {
+    const el = recCursor();
+    el.style.display = "block";
+    const sx = recPlaying && recCursor._vw ? window.innerWidth / recCursor._vw : 1;
+    const sy = recPlaying && recCursor._vh ? window.innerHeight / recCursor._vh : 1;
+    el.style.left = Math.round(x * sx) + "px";
+    el.style.top = Math.round(y * sy) + "px";
+  }
+
+  function recHideCursor() {
+    const el = document.getElementById("ff-mem-cursor");
+    if (el) el.style.display = "none";
+  }
+
+  async function recDoFill(step) {
+    for (let i = 0; i < 8; i++) {
+      const forms = currentForms();
+      let idx = forms.findIndex((f) =>
+        Object.prototype.hasOwnProperty.call(f.get() || {}, step.name)
+      );
+      if (idx < 0) {
+        const overlayIdx = forms.findIndex((f) => inOpenOverlay(f.el));
+        if (overlayIdx >= 0) idx = overlayIdx;
+        else if (forms.length) idx = 0;
+      }
+      if (idx >= 0 && step.name) {
+        const patches = forms.map((_, j) => (j === idx ? { [step.name]: step.value } : {}));
+        await applyMerge(patches);
+        return true;
+      }
+      await delay(180);
+    }
+    return false;
+  }
+
+  async function recDoClick(step) {
+    recMoveCursor(step.x, step.y);
+    await delay(60);
+    for (let i = 0; i < 8; i++) {
+      const el = recFind(step);
+      if (el) {
+        el.scrollIntoView({ block: "nearest", inline: "nearest" });
+        el.click();
+        if (step.kind === "dblclick") {
+          await delay(50);
+          el.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true, view: window }));
+        }
+        await delay(260);
+        return true;
+      }
+      await delay(180);
+    }
+    const under = document.elementFromPoint(step.x, step.y);
+    if (under && !isHudTree(under)) {
+      recClickable(under).click();
+      await delay(260);
+      return true;
+    }
+    return false;
+  }
+
+  function recDoScroll(step) {
+    if (step.win) {
+      window.scrollTo(step.left || 0, step.top || 0);
+      return;
+    }
+    if (step.path) {
+      try {
+        const el = document.querySelector(step.path);
+        if (el) {
+          el.scrollTop = step.top || 0;
+          el.scrollLeft = step.left || 0;
+        }
+      } catch (_) {}
+    }
+  }
+
+  function recScript(item) {
+    const lines = [
+      "【复现步骤】 " + (item.note || "") + "  " + timeStr(item.time),
+      item.path || "",
+      "",
+    ];
+    let n = 1;
+    (item.steps || []).forEach((s) => {
+      const sec = ((s.t || 0) / 1000).toFixed(1) + "s";
+      if (s.kind === "click")
+        lines.push(n++ + ". [" + sec + "] 点击「" + (s.text || s.label || s.name || s.tag) + "」");
+      else if (s.kind === "dblclick")
+        lines.push(n++ + ". [" + sec + "] 双击「" + (s.text || s.label || s.name || s.tag) + "」");
+      else if (s.kind === "fill")
+        lines.push(n++ + ". [" + sec + "] 填写 " + (s.label || s.name) + " = " + fmtVal(s.value));
+      else if (s.kind === "scroll")
+        lines.push(n++ + ". [" + sec + "] 滚动");
+    });
+    if (n === 1) lines.push("(没有可复述的步骤)");
+    return lines.join("\n");
+  }
+
+  function recStart() {
+    if (recPlaying) return toast("正在回放");
+    recOn = true;
+    recSteps = [];
+    recMoves = [];
+    recT0 = Date.now();
+    recMoveAt = 0;
+    recFillT = {};
+    recPage = pageKey();
+    recPaint();
+    setOpen(false);
+    toast("录制中：鼠标怎么点都会记下。再点「录制」结束");
+  }
+
+  function recStop() {
+    recOn = false;
+    Object.keys(recFillT).forEach((k) => clearTimeout(recFillT[k]));
+    recFillT = {};
+    recPaint();
+    if (!recSteps.length && recMoves.length < 8) {
+      recSteps = [];
+      recMoves = [];
+      toast("没有录到操作");
+      return;
+    }
+    const note = window.prompt("这条复现怎么称呼？", "复现 " + recSteps.length + " 步") ?? "";
+    const item = {
+      id: Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+      time: Date.now(),
+      note: String(note).trim() || "复现 " + recSteps.length + " 步",
+      path: location.pathname + location.hash.split("?")[0],
+      vw: window.innerWidth,
+      vh: window.innerHeight,
+      steps: recSteps.slice(),
+      moves: recMoves.slice(),
+    };
+    const key = recPage || pageKey();
+    const list = parseList(storeGet(key + "_rec"));
+    storeSet(key + "_rec", JSON.stringify([item, ...list].slice(0, MAX_REC)));
+    recSteps = [];
+    recMoves = [];
+    toast("已记下 " + item.steps.length + " 步，Shift+录制可回放");
+    if (panel.style.display === "block" && panelMode === "rec") renderRec();
+  }
+
+  function recToggle() {
+    if (recOn) recStop();
+    else recStart();
+  }
+
+  async function playRec(id) {
+    const item = loadRecs().find((x) => x.id === id);
+    if (!item) return toast("这条已经不在了");
+    if (recOn) return toast("先停下录制");
+    if (recPlaying) return;
+    if (!window.confirm("按录制回放，会真实点击页面（含提交），用来复现问题。")) return;
+    recPlaying = true;
+    recPaint();
+    closePanel();
+    setOpen(false);
+    recCursor._vw = item.vw || window.innerWidth;
+    recCursor._vh = item.vh || window.innerHeight;
+    recMoveCursor(item.moves && item.moves[0] ? item.moves[0].x : 20, item.moves && item.moves[0] ? item.moves[0].y : 20);
+    const events = [];
+    (item.moves || []).forEach((m) => events.push({ t: m.t, _k: "move", x: m.x, y: m.y }));
+    (item.steps || []).forEach((s) => events.push(s));
+    events.sort((a, b) => (a.t || 0) - (b.t || 0));
+    let lastT = 0;
+    let ok = 0;
+    let fail = 0;
+    for (let i = 0; i < events.length; i++) {
+      if (!recPlaying) break;
+      const ev = events[i];
+      let wait = ((ev.t || 0) - lastT) / 1.2;
+      if (wait > 700) wait = 700;
+      if (wait > 16) await delay(wait);
+      lastT = ev.t || lastT;
+      if (ev._k === "move") {
+        recMoveCursor(ev.x, ev.y);
+        continue;
+      }
+      if (ev.kind === "click" || ev.kind === "dblclick") {
+        if (await recDoClick(ev)) ok++;
+        else fail++;
+      } else if (ev.kind === "fill") {
+        if (await recDoFill(ev)) ok++;
+        else fail++;
+      } else if (ev.kind === "scroll") recDoScroll(ev);
+    }
+    recPlaying = false;
+    recPaint();
+    recHideCursor();
+    toastStats("回放", { ok, fail, skip: 0 });
+  }
+
+  function delRec(id) {
+    saveRecs(loadRecs().filter((x) => x.id !== id));
+    renderRec();
+  }
+
+  function renameRec(id, note) {
+    saveRecs(loadRecs().map((x) => (x.id === id ? { ...x, note } : x)));
+  }
+
+  function clearRecs() {
+    const n = loadRecs().length;
+    if (!n) return toast("这一页没有录制");
+    if (!window.confirm("确定清空本页 " + n + " 条录制？")) return;
+    saveRecs([]);
+    renderRec();
+    toast("已清空本页录制");
+  }
+
+  function recPreview(item) {
+    const clicks = (item.steps || []).filter((s) => s.kind === "click" || s.kind === "dblclick");
+    const fills = (item.steps || []).filter((s) => s.kind === "fill");
+    const first = (item.steps || [])
+      .filter((s) => s.kind === "click" || s.kind === "fill")
+      .slice(0, 4)
+      .map((s) => (s.kind === "fill" ? s.label || s.name : s.text || s.tag))
+      .filter(Boolean);
+    return (
+      "点 " + clicks.length + " · 填 " + fills.length +
+      (first.length ? " · " + first.join(" → ") : "")
+    );
+  }
+
+  function renderRec() {
+    if (panel.style.display !== "block" || panelMode !== "rec") return;
+    const list = loadRecs();
+    panel.innerHTML =
+      '<div class="scan"></div><div class="hd"><span class="mark"></span><span class="ttl">复现录制</span>' +
+      '<span class="cnt">' + list.length + "<i>/" + MAX_REC + "</i></span>" +
+      '<button type="button" class="saveid" title="开始或停止录制">录制</button>' +
+      '<button type="button" class="wipe" title="清空本页录制">清空</button>' +
+      '<button type="button" class="x" title="关闭">✕</button></div><div class="bd"></div>';
+    panel.querySelector(".x").onclick = closePanel;
+    panel.querySelector(".saveid").onclick = recToggle;
+    const wipe = panel.querySelector(".wipe");
+    wipe.disabled = !list.length;
+    wipe.onclick = clearRecs;
+    const bd = panel.querySelector(".bd");
+    if (!list.length) {
+      bd.innerHTML =
+        '<div class="empty"><div class="hex"></div><p>暂无录制</p><span>点「录制」后按复现路径操作，再点一次结束</span></div>';
+      return;
+    }
+    list.forEach((item, idx) => {
+      const row = document.createElement("div");
+      row.className = "row";
+      row.style.animationDelay = idx * 0.04 + "s";
+      const noteInput = document.createElement("input");
+      noteInput.value = item.note || "";
+      noteInput.placeholder = "点这里改备注";
+      noteInput.addEventListener("change", () => renameRec(item.id, noteInput.value.trim()));
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.appendChild(document.createElement("span")).textContent = timeStr(item.time);
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.textContent = (item.steps || []).length + " 步";
+      meta.appendChild(chip);
+      if (item.path) {
+        const p = document.createElement("span");
+        p.textContent = item.path;
+        meta.appendChild(p);
+      }
+      const ops = document.createElement("div");
+      ops.className = "ops";
+      [
+        ["回放", () => playRec(item.id), "go"],
+        ["复制", () => copyText(recScript(item), "已复制复现步骤"), ""],
+        ["删除", () => delRec(item.id), "del"],
+      ].forEach(([text, fn, cls]) => {
+        const b = document.createElement("button");
+        b.className = "op " + cls;
+        b.textContent = text;
+        b.addEventListener("click", fn);
+        ops.appendChild(b);
+      });
+      const preview = document.createElement("div");
+      preview.className = "preview";
+      const pv = recPreview(item);
+      preview.textContent = pv;
+      preview.title = pv;
+      row.append(noteInput, ops, meta, preview);
       bd.appendChild(row);
     });
   }
@@ -3414,8 +3953,9 @@ function ffMemApp() {
     '<button type="button" data-a="id" title="Alt+U"><span class="idx">07</span><span class="lab">身份</span><span class="en">ID</span></button>' +
     '<button type="button" data-a="purge" title="Alt+R 清空缓存并重置 token"><span class="idx">08</span><span class="lab">重置</span><span class="en">PURGE</span></button>' +
     '<button type="button" data-a="net" title="Alt+N 请求抓包"><span class="idx">09</span><span class="lab">抓包</span><span class="en">NET</span></button>' +
+    '<button type="button" data-a="rec" title="Alt+E 录制复现 · Shift+点击打开列表"><span class="idx">10</span><span class="lab">录制</span><span class="en">REC</span></button>' +
     "</div>" +
-    '<div class="hint">ALT+S/F/V/U/R/N · DRAG</div></div>';
+    '<div class="hint">ALT+S/F/V/U/R/N/E · DRAG</div></div>';
 
   const core = hud.querySelector(".core");
   hud.querySelector(".menu").addEventListener("click", (e) => {
@@ -3427,6 +3967,7 @@ function ffMemApp() {
     if (a === "id") toggleIds();
     if (a === "purge") purgeSite();
     if (a === "net") toggleNet();
+    if (a === "rec") e.shiftKey ? toggleRecPanel() : recToggle();
     if (a === "copy") copyLatest();
     if (a === "imp") imp();
   });
@@ -3665,6 +4206,102 @@ function ffMemApp() {
     if (!e.target.closest("#ff-mem-ctx")) hideCtx();
   });
 
+  document.addEventListener(
+    "mousemove",
+    (e) => {
+      if (!recOn || recPlaying) return;
+      if (e.target instanceof Element && isHudTree(e.target)) return;
+      const now = Date.now();
+      if (now - recMoveAt < 45) return;
+      recMoveAt = now;
+      recMoves.push({ t: recNow(), x: e.clientX, y: e.clientY });
+      if (recMoves.length > MAX_REC_MOVES) recMoves.splice(0, recMoves.length - MAX_REC_MOVES);
+    },
+    true
+  );
+  document.addEventListener(
+    "click",
+    (e) => {
+      if (!recOn || recPlaying || e.button) return;
+      const t = e.target;
+      if (!(t instanceof Element) || isHudTree(t)) return;
+      if (t === document.body || t === document.documentElement) return;
+      const fp = recFp(t, e);
+      if (!fp) return;
+      const last = recSteps[recSteps.length - 1];
+      if (last && last.kind === "click" && last.path === fp.path && recNow() - last.t < 120)
+        return;
+      recPushStep(fp);
+    },
+    true
+  );
+  document.addEventListener(
+    "dblclick",
+    (e) => {
+      if (!recOn || recPlaying) return;
+      const t = e.target;
+      if (!(t instanceof Element) || isHudTree(t)) return;
+      const fp = recFp(t, e);
+      if (!fp) return;
+      fp.kind = "dblclick";
+      const last = recSteps[recSteps.length - 1];
+      if (last && last.kind === "click" && last.path === fp.path) recSteps.pop();
+      recPushStep(fp);
+    },
+    true
+  );
+  document.addEventListener(
+    "input",
+    (e) => {
+      if (!recOn || recPlaying) return;
+      const field = fieldFromEvent(e);
+      if (!field) return;
+      clearTimeout(recFillT[field.name]);
+      recFillT[field.name] = setTimeout(() => recPushFill(field), 280);
+    },
+    true
+  );
+  document.addEventListener(
+    "change",
+    (e) => {
+      if (!recOn || recPlaying) return;
+      const field = fieldFromEvent(e);
+      if (!field) return;
+      clearTimeout(recFillT[field.name]);
+      recPushFill(field);
+    },
+    true
+  );
+  document.addEventListener(
+    "scroll",
+    (e) => {
+      if (!recOn || recPlaying) return;
+      const t = e.target;
+      let step;
+      if (t === document || t === document.documentElement || t === document.body) {
+        step = { kind: "scroll", t: recNow(), win: true, top: window.scrollY, left: window.scrollX };
+      } else if (t instanceof Element && !isHudTree(t) && t.scrollHeight > t.clientHeight + 8) {
+        step = {
+          kind: "scroll",
+          t: recNow(),
+          win: false,
+          top: t.scrollTop,
+          left: t.scrollLeft,
+          path: recPath(t),
+        };
+      } else return;
+      const last = recSteps[recSteps.length - 1];
+      if (last && last.kind === "scroll" && last.win === step.win && last.path === step.path) {
+        last.top = step.top;
+        last.left = step.left;
+        last.t = step.t;
+        return;
+      }
+      recPushStep(step);
+    },
+    true
+  );
+
   window.addEventListener("keydown", (e) => {
     if (pickEl.style.display !== "none") {
       if (e.key === "Escape") {
@@ -3679,6 +4316,14 @@ function ffMemApp() {
       }
     }
     if (e.key === "Escape") {
+      if (recPlaying) {
+        e.preventDefault();
+        recPlaying = false;
+        recPaint();
+        recHideCursor();
+        toast("已停止回放");
+        return;
+      }
       hideCtx();
       if (panel.style.display === "block") {
         if ((panelMode === "hist" && histQuery) || (panelMode === "net" && netQuery)) {
@@ -3719,6 +4364,10 @@ function ffMemApp() {
     } else if (k === "n" && !e.shiftKey) {
       e.preventDefault();
       toggleNet();
+    } else if (k === "e") {
+      e.preventDefault();
+      if (e.shiftKey) toggleRecPanel();
+      else recToggle();
     }
   });
 
@@ -3727,6 +4376,7 @@ function ffMemApp() {
   document.documentElement.appendChild(pickEl);
   document.documentElement.appendChild(ctx);
   hudReady = true;
+  recPaint();
   resumePendingLogin();
 }
 
