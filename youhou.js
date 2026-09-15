@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         FastForm 填写记忆（Element Plus / Vant）
-// @version      1.6.1
+// @version      1.7.0
 // @match        http://192.168.120.228/*
 // @match        http://192.168.100.156/*
 // @grant        GM_getValue
@@ -15,9 +15,9 @@
 function ffMemApp() {
   "use strict";
 
-  const VERSION = "1.6.1";
+  const VERSION = "1.7.0";
   const MAX_HIST = 30;
-  const MAX_IDS = 12;
+  const MAX_IDS = 36;
   const MAX_NET = 40;
   const MAX_NET_BODY = 80000;
   const pageKey = () =>
@@ -27,6 +27,8 @@ function ffMemApp() {
   const histKey = () => pageKey() + "_hist";
   const posKey = "ff_mem_bar_pos";
   const idKey = "ff_mem_ids";
+  const idGroupKey = "ff_mem_id_group";
+  const idGroupLastKey = "ff_mem_id_group_last";
   const pendingKey = "ff_mem_pending_login";
   const lastIdKey = "ff_mem_last_id";
 
@@ -890,6 +892,34 @@ function ffMemApp() {
       letter-spacing: 1px;
     }
     #ff-mem-hist .saveid:hover { border-color: #7af6ff; box-shadow: 0 0 8px #00e5ff44; }
+    #ff-mem-hist .gbar {
+      position: relative; z-index: 4;
+      display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+      padding: 8px 12px 8px 18px;
+      border-bottom: 1px solid #2ee6ff22;
+    }
+    #ff-mem-hist .gbar button {
+      border: 1px solid #2ee6ff44; background: #0a2030; color: #9ef6ff;
+      padding: 2px 8px; cursor: pointer;
+      font: 11px "Microsoft YaHei", sans-serif; letter-spacing: 1px;
+    }
+    #ff-mem-hist .gbar button:hover { border-color: #7af6ff; box-shadow: 0 0 8px #00e5ff44; }
+    #ff-mem-hist .gbar button.on {
+      color: #061018; background: #5fffc0; border-color: #5fffc0; font-weight: 700;
+    }
+    #ff-mem-hist .ghd {
+      display: flex; align-items: center; gap: 8px;
+      color: #7af6ff; font: 11px Consolas, monospace; letter-spacing: 2px;
+      padding: 10px 4px 6px;
+    }
+    #ff-mem-hist .ghd .n { color: #4a8890; letter-spacing: 0; }
+    #ff-mem-hist .g-in {
+      width: 7.5em; flex: none; min-width: 0;
+      background: #071820; border: 1px solid #2ee6ff44 !important;
+      color: #7af6ff !important; padding: 0 6px !important;
+      font: 11px "Microsoft YaHei", sans-serif !important;
+    }
+    #ff-mem-hist .g-in:focus { border-color: #7af6ff !important; }
     #ff-mem-hist .op.go {
       color: #061018; background: #5fffc0; border-color: #5fffc0; font-weight: 700;
     }
@@ -941,11 +971,11 @@ function ffMemApp() {
       background: #0c2834; box-shadow: 0 0 16px #00e5ff33;
       transform: translateX(3px);
     }
-    #ff-mem-hist .row input {
+    #ff-mem-hist .row > input {
       width: 100%; background: transparent; border: 0; border-bottom: 1px solid #2ee6ff33;
       color: #e8ffff; padding: 2px 0; outline: none; font: 13px "Microsoft YaHei", sans-serif;
     }
-    #ff-mem-hist .row input:focus { border-bottom-color: #7af6ff; }
+    #ff-mem-hist .row > input:focus { border-bottom-color: #7af6ff; }
     #ff-mem-hist .meta {
       display: flex; gap: 10px; align-items: center;
       color: #6ab; font: 11px Consolas, monospace; grid-column: 1;
@@ -2407,6 +2437,7 @@ function ffMemApp() {
   }
 
   let histQuery = "";
+  let idGroupFilter = storeGet(idGroupKey) || "*";
 
   function histHaystack(item) {
     const chunks = [item.note || ""];
@@ -2430,6 +2461,38 @@ function ffMemApp() {
 
   function saveIds(list) {
     storeSet(idKey, JSON.stringify(list.slice(0, MAX_IDS)));
+  }
+
+  function normGroup(g) {
+    return String(g || "").trim();
+  }
+
+  function groupLabel(g) {
+    return normGroup(g) || "未分组";
+  }
+
+  function parseGroupInput(s) {
+    const n = String(s || "").trim();
+    if (!n || n === "未分组") return "";
+    return n;
+  }
+
+  function idGroupNames(list) {
+    const set = new Set();
+    (list || loadIds()).forEach((x) => set.add(groupLabel(x.group)));
+    const named = [...set].filter((k) => k !== "未分组").sort((a, b) => a.localeCompare(b, "zh"));
+    if (set.has("未分组")) named.push("未分组");
+    return named;
+  }
+
+  function groupedIds(list) {
+    const map = new Map();
+    list.forEach((item) => {
+      const k = groupLabel(item.group);
+      if (!map.has(k)) map.set(k, []);
+      map.get(k).push(item);
+    });
+    return idGroupNames(list).map((k) => ({ label: k, items: map.get(k) || [] }));
   }
 
   function loadHist() {
@@ -3116,9 +3179,17 @@ function ffMemApp() {
     if (!pass) return toast("密码是空的，先输入再保存");
     const name = window.prompt("身份名称", user);
     if (name == null) return;
+    const defGroup =
+      idGroupFilter && idGroupFilter !== "*" && idGroupFilter !== "未分组"
+        ? idGroupFilter
+        : storeGet(idGroupLastKey) || "";
+    const groupRaw = window.prompt("项目分组，用来区分项目（可空）", defGroup);
+    if (groupRaw == null) return;
+    const group = parseGroupInput(groupRaw);
     const item = {
       id: Date.now() + "_" + Math.random().toString(36).slice(2, 7),
       name: String(name).trim() || user,
+      group,
       user,
       pass,
       userKey: box.userKey,
@@ -3126,10 +3197,17 @@ function ffMemApp() {
       loginPath: loginPath(),
       time: Date.now(),
     };
-    const list = loadIds().filter((x) => x.user !== user);
+    const list = loadIds().filter(
+      (x) => !(x.user === user && groupLabel(x.group) === groupLabel(group))
+    );
     saveIds([item, ...list]);
     storeSet(lastIdKey, item.id);
-    toast("已保存身份「" + item.name + "」");
+    storeSet(idGroupLastKey, group);
+    if (group) {
+      idGroupFilter = groupLabel(group);
+      storeSet(idGroupKey, idGroupFilter);
+    }
+    toast("已保存「" + item.name + "」" + (group ? " · " + group : ""));
     renderIds();
   }
 
@@ -3139,15 +3217,35 @@ function ffMemApp() {
     saveIds(loadIds().map((x) => (x.id === id ? { ...x, name: n } : x)));
   }
 
+  function setIdGroup(id, group) {
+    saveIds(loadIds().map((x) => (x.id === id ? { ...x, group: parseGroupInput(group) } : x)));
+    renderIds();
+  }
+
+  function setIdFilter(g) {
+    idGroupFilter = g || "*";
+    storeSet(idGroupKey, idGroupFilter);
+    renderIds();
+  }
+
   function delId(id) {
     saveIds(loadIds().filter((x) => x.id !== id));
     renderIds();
   }
 
   function clearIds() {
-    const n = loadIds().length;
-    if (!n) return toast("还没有身份档");
-    if (!window.confirm("确定清空全部 " + n + " 个身份？")) return;
+    const list = loadIds();
+    if (!list.length) return toast("还没有身份档");
+    if (idGroupFilter && idGroupFilter !== "*") {
+      const n = list.filter((x) => groupLabel(x.group) === idGroupFilter).length;
+      if (!n) return toast("本组没有身份");
+      if (!window.confirm("确定清空「" + idGroupFilter + "」的 " + n + " 个身份？")) return;
+      saveIds(list.filter((x) => groupLabel(x.group) !== idGroupFilter));
+      toast("已清空「" + idGroupFilter + "」");
+      renderIds();
+      return;
+    }
+    if (!window.confirm("确定清空全部 " + list.length + " 个身份？")) return;
     saveIds([]);
     renderIds();
     toast("已清空身份档");
@@ -3155,54 +3253,119 @@ function ffMemApp() {
 
   function renderIds() {
     if (panel.style.display !== "block" || panelMode !== "id") return;
-    const list = loadIds();
+    const all = loadIds();
     const last = storeGet(lastIdKey);
+    const names = idGroupNames(all);
+    if (idGroupFilter !== "*" && names.length && !names.includes(idGroupFilter))
+      idGroupFilter = "*";
+    const shown =
+      !idGroupFilter || idGroupFilter === "*"
+        ? all
+        : all.filter((x) => groupLabel(x.group) === idGroupFilter);
+    const sections = groupedIds(shown);
+    const showHeads = !idGroupFilter || idGroupFilter === "*";
     panel.innerHTML =
       '<div class="scan"></div><div class="hd"><span class="mark"></span><span class="ttl">身份档</span>' +
-      '<span class="cnt">' + list.length + "<i>/" + MAX_IDS + "</i></span>" +
+      '<span class="cnt">' +
+      (idGroupFilter && idGroupFilter !== "*"
+        ? shown.length + "<i>/" + all.length + "</i>"
+        : all.length + "<i>/" + MAX_IDS + "</i>") +
+      "</span>" +
       '<button type="button" class="saveid" title="从当前登录框保存">保存</button>' +
-      '<button type="button" class="wipe" title="清空全部身份">清空</button>' +
-      '<button type="button" class="x" title="关闭">✕</button></div><div class="bd"></div>';
+      '<button type="button" class="wipe" title="清空当前分组，全部时清空所有">清空</button>' +
+      '<button type="button" class="x" title="关闭">✕</button></div>' +
+      '<div class="gbar"></div><div class="bd"></div>';
     panel.querySelector(".x").onclick = closePanel;
     panel.querySelector(".saveid").onclick = saveIdentity;
     const wipe = panel.querySelector(".wipe");
-    wipe.disabled = !list.length;
+    wipe.disabled = !shown.length;
     wipe.onclick = clearIds;
+    const bar = panel.querySelector(".gbar");
+    const mkChip = (label, token) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = label;
+      if ((idGroupFilter || "*") === token) b.className = "on";
+      b.addEventListener("click", () => setIdFilter(token));
+      return b;
+    };
+    bar.appendChild(mkChip("全部", "*"));
+    names.forEach((g) => bar.appendChild(mkChip(g, g)));
     const bd = panel.querySelector(".bd");
-    if (!list.length) {
+    if (!all.length) {
       bd.innerHTML =
         '<div class="empty"><div class="hex"></div><p>暂无身份</p><span>在登录页填好账号密码，点「保存」</span></div>';
       return;
     }
-    list.forEach((item, idx) => {
-      const row = document.createElement("div");
-      row.className = "row" + (item.id === last ? " on" : "");
-      row.style.animationDelay = idx * 0.04 + "s";
-      const nameInput = document.createElement("input");
-      nameInput.value = item.name || item.user || "";
-      nameInput.placeholder = "点这里改名称";
-      nameInput.addEventListener("change", () => renameId(item.id, nameInput.value));
-      const meta = document.createElement("div");
-      meta.className = "meta";
-      meta.innerHTML =
-        "<span>" + (item.user || "") + "</span>" +
-        '<span class="chip">••••</span>' +
-        (item.id === last ? '<span class="chip">上次</span>' : "") +
-        (item.loginPath ? "<span>" + item.loginPath + "</span>" : "");
-      const ops = document.createElement("div");
-      ops.className = "ops";
-      [
-        ["切换", () => switchLogin(item), "go"],
-        ["删除", () => delId(item.id), "del"],
-      ].forEach(([text, fn, cls]) => {
-        const b = document.createElement("button");
-        b.className = "op " + cls;
-        b.textContent = text;
-        b.addEventListener("click", fn);
-        ops.appendChild(b);
+    if (!shown.length) {
+      bd.innerHTML =
+        '<div class="empty"><div class="hex"></div><p>本组没有身份</p><span>换个项目分组，或点「保存」</span></div>';
+      return;
+    }
+    let delay = 0;
+    sections.forEach((sec) => {
+      if (showHeads && names.length > 1) {
+        const hd = document.createElement("div");
+        hd.className = "ghd";
+        const lab = document.createElement("span");
+        lab.textContent = sec.label;
+        const num = document.createElement("span");
+        num.className = "n";
+        num.textContent = String(sec.items.length);
+        hd.append(lab, num);
+        bd.appendChild(hd);
+      }
+      sec.items.forEach((item) => {
+        const row = document.createElement("div");
+        row.className = "row" + (item.id === last ? " on" : "");
+        row.style.animationDelay = delay * 0.04 + "s";
+        delay++;
+        const nameInput = document.createElement("input");
+        nameInput.value = item.name || item.user || "";
+        nameInput.placeholder = "点这里改名称";
+        nameInput.addEventListener("change", () => renameId(item.id, nameInput.value));
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        const gIn = document.createElement("input");
+        gIn.className = "g-in";
+        gIn.value = item.group || "";
+        gIn.placeholder = "项目";
+        gIn.title = "项目分组";
+        gIn.addEventListener("change", () => setIdGroup(item.id, gIn.value));
+        meta.appendChild(gIn);
+        const user = document.createElement("span");
+        user.textContent = item.user || "";
+        meta.appendChild(user);
+        const dots = document.createElement("span");
+        dots.className = "chip";
+        dots.textContent = "••••";
+        meta.appendChild(dots);
+        if (item.id === last) {
+          const chip = document.createElement("span");
+          chip.className = "chip";
+          chip.textContent = "上次";
+          meta.appendChild(chip);
+        }
+        if (item.loginPath) {
+          const path = document.createElement("span");
+          path.textContent = item.loginPath;
+          meta.appendChild(path);
+        }
+        const ops = document.createElement("div");
+        ops.className = "ops";
+        [
+          ["切换", () => switchLogin(item), "go"],
+          ["删除", () => delId(item.id), "del"],
+        ].forEach(([text, fn, cls]) => {
+          const b = document.createElement("button");
+          b.className = "op " + cls;
+          b.textContent = text;
+          b.addEventListener("click", fn);
+          ops.appendChild(b);
+        });
+        row.append(nameInput, ops, meta);
+        bd.appendChild(row);
       });
-      row.append(nameInput, ops, meta);
-      bd.appendChild(row);
     });
   }
 
