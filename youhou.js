@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         FastForm 填写记忆（Element Plus / Vant）
+// @name         填核 HEX
 // @version      1.9.3
 // @match        http://192.168.120.228/*
 // @match        http://192.168.100.156/*
