@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         FastForm 填写记忆（Element Plus / Vant）
-// @version      1.3.0
+// @version      1.6.1
 // @match        http://192.168.120.228/*
 // @match        http://192.168.100.156/*
 // @grant        GM_getValue
@@ -9,19 +9,26 @@
 // @grant        GM_listValues
 // @grant        GM_addElement
 // @inject-into  content
+// @run-at       document-start
 // ==/UserScript==
 
 function ffMemApp() {
   "use strict";
 
-  const VERSION = "1.3.0";
+  const VERSION = "1.6.1";
   const MAX_HIST = 30;
+  const MAX_IDS = 12;
+  const MAX_NET = 40;
+  const MAX_NET_BODY = 80000;
   const pageKey = () =>
     "ff_mem_" + location.pathname + location.hash.split("?")[0];
   const oldOriginKey = () =>
     "ff_mem_" + location.origin + location.pathname + location.hash.split("?")[0];
   const histKey = () => pageKey() + "_hist";
   const posKey = "ff_mem_bar_pos";
+  const idKey = "ff_mem_ids";
+  const pendingKey = "ff_mem_pending_login";
+  const lastIdKey = "ff_mem_last_id";
 
   function gmPing(op, key, val) {
     try {
@@ -121,6 +128,302 @@ function ffMemApp() {
       if (latest) storeSet(neu, latest);
     }
   })();
+
+  const netLog = [];
+  let netQuery = "";
+  let netOpenId = "";
+  let netRaf = 0;
+  let hudReady = false;
+
+  function netChanged() {
+    if (!hudReady || panel.style.display !== "block" || panelMode !== "net") return;
+    if (netRaf) return;
+    netRaf = requestAnimationFrame(() => {
+      netRaf = 0;
+      renderNetList(false);
+    });
+  }
+
+  function clipBody(s) {
+    const t = String(s == null ? "" : s);
+    if (t.length <= MAX_NET_BODY) return t;
+    return t.slice(0, MAX_NET_BODY) + "\n…[截断 " + t.length + " 字]";
+  }
+
+  function tryJson(s) {
+    const t = String(s || "").trim();
+    if (!t) return null;
+    if (t[0] !== "{" && t[0] !== "[") return null;
+    try {
+      return JSON.parse(t);
+    } catch {
+      return null;
+    }
+  }
+
+  function prettyJson(v) {
+    try {
+      return JSON.stringify(v, null, 2);
+    } catch {
+      return String(v);
+    }
+  }
+
+  function maskJson(v) {
+    if (v == null) return v;
+    if (Array.isArray(v)) return v.map(maskJson);
+    if (typeof v !== "object") return v;
+    const out = {};
+    Object.keys(v).forEach((k) => {
+      out[k] = /pass|pwd|password|secret|token/i.test(k) ? "••••" : maskJson(v[k]);
+    });
+    return out;
+  }
+
+  function serializeBody(body) {
+    if (body == null || body === "") return "";
+    if (typeof body === "string") return clipBody(body);
+    if (typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams)
+      return clipBody(body.toString());
+    if (typeof FormData !== "undefined" && body instanceof FormData) {
+      const parts = [];
+      body.forEach((v, k) => {
+        if (v && typeof v === "object" && typeof v.name === "string")
+          parts.push(k + "=" + v.name);
+        else parts.push(k + "=" + v);
+      });
+      return clipBody(parts.join("&"));
+    }
+    if (typeof Blob !== "undefined" && body instanceof Blob)
+      return "[blob " + (body.type || "bin") + " " + body.size + "]";
+    if (body instanceof ArrayBuffer || ArrayBuffer.isView(body))
+      return "[binary " + (body.byteLength || 0) + "]";
+    try {
+      return clipBody(typeof body === "object" ? JSON.stringify(body) : String(body));
+    } catch {
+      return "[unreadable]";
+    }
+  }
+
+  function headerMap(h) {
+    const out = {};
+    if (!h) return out;
+    try {
+      if (typeof h.forEach === "function") {
+        h.forEach((v, k) => {
+          out[k] = v;
+        });
+      } else if (typeof h === "object") {
+        Object.keys(h).forEach((k) => {
+          out[k] = h[k];
+        });
+      }
+    } catch (_) {}
+    return out;
+  }
+
+  function headerGet(headers, name) {
+    const want = String(name).toLowerCase();
+    const keys = Object.keys(headers || {});
+    for (let i = 0; i < keys.length; i++) {
+      if (keys[i].toLowerCase() === want) return headers[keys[i]];
+    }
+    return "";
+  }
+
+  function absUrl(u) {
+    try {
+      return new URL(u, location.href).href;
+    } catch {
+      return String(u || "");
+    }
+  }
+
+  function netPath(u) {
+    try {
+      const x = new URL(absUrl(u));
+      return x.pathname + x.search;
+    } catch {
+      return String(u || "");
+    }
+  }
+
+  function netNoise(u) {
+    const href = absUrl(u);
+    if (/hot-update|__vite|sockjs|websocket|webpack/i.test(href)) return true;
+    try {
+      const p = new URL(href).pathname.toLowerCase();
+      if (
+        /\.(js|mjs|css|png|jpe?g|gif|svg|webp|ico|woff2?|ttf|eot|map|mp4|mp3|wasm)$/.test(
+          p
+        )
+      )
+        return true;
+      if (/\/(heartbeat|ping|health|actuator|keep-?alive)\b/i.test(p)) return true;
+    } catch (_) {}
+    return false;
+  }
+
+  function looksApi(rec) {
+    const p = String(rec.path || rec.url || "");
+    if (/\/(api|admin|system|auth|prod-api|dev-api)\b/i.test(p)) return true;
+    if (rec.reqJson != null || rec.resJson != null) return true;
+    if (rec.method && rec.method !== "GET" && rec.method !== "HEAD" && rec.reqText)
+      return true;
+    const ct = String(rec.resType || rec.reqType || "");
+    if (/json|xml|urlencoded/i.test(ct)) return true;
+    return false;
+  }
+
+  function pushNet(rec) {
+    netLog.unshift(rec);
+    if (netLog.length > MAX_NET) netLog.length = MAX_NET;
+    netChanged();
+  }
+
+  function dropNet(id) {
+    const i = netLog.findIndex((x) => x.id === id);
+    if (i >= 0) netLog.splice(i, 1);
+    if (netOpenId === id) netOpenId = "";
+    netChanged();
+  }
+
+  function newNet(method, url) {
+    return {
+      id: Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+      t: Date.now(),
+      ms: 0,
+      method: String(method || "GET").toUpperCase(),
+      url: absUrl(url),
+      path: netPath(url),
+      status: 0,
+      pending: true,
+      reqText: "",
+      reqJson: null,
+      reqType: "",
+      resText: "",
+      resJson: null,
+      resType: "",
+      headers: {},
+    };
+  }
+
+  function finishNet(rec, extra) {
+    Object.assign(rec, extra || {}, { pending: false, ms: Date.now() - rec.t });
+    if (!looksApi(rec)) {
+      dropNet(rec.id);
+      return;
+    }
+    netChanged();
+  }
+
+  function installNetHook() {
+    if (window.__FF_MEM_NET__) return;
+    window.__FF_MEM_NET__ = true;
+
+    const origFetch = window.fetch;
+    if (typeof origFetch === "function") {
+      const wrapped = function (input, init) {
+        const req = input instanceof Request ? input : null;
+        const url = req ? req.url : typeof input === "string" ? input : input && input.url;
+        const method = (init && init.method) || (req && req.method) || "GET";
+        if (netNoise(url)) return origFetch.apply(this, arguments);
+        const rec = newNet(method, url);
+        rec.headers = headerMap(req && req.headers);
+        Object.assign(rec.headers, headerMap(init && init.headers));
+        rec.reqType = headerGet(rec.headers, "content-type");
+        const body = init && "body" in init ? init.body : null;
+        const ready = body != null
+          ? Promise.resolve(serializeBody(body))
+          : req
+            ? req
+                .clone()
+                .text()
+                .then(clipBody)
+                .catch(() => "")
+            : Promise.resolve("");
+        ready.then((text) => {
+          rec.reqText = text;
+          rec.reqJson = tryJson(text);
+          netChanged();
+        });
+        pushNet(rec);
+        return origFetch.apply(this, arguments).then(
+          (res) => {
+            rec.resType = (res.headers && res.headers.get("content-type")) || "";
+            const ct = rec.resType;
+            if (/octet-stream|image\/|audio\/|video\/|font\//i.test(ct)) {
+              finishNet(rec, { status: res.status, resText: "[" + ct + "]" });
+              return res;
+            }
+            res
+              .clone()
+              .text()
+              .then((text) => {
+                finishNet(rec, {
+                  status: res.status,
+                  resText: clipBody(text),
+                  resJson: tryJson(text),
+                });
+              })
+              .catch(() => finishNet(rec, { status: res.status }));
+            return res;
+          },
+          (err) => {
+            finishNet(rec, { status: 0, resText: String(err && err.message ? err.message : err) });
+            throw err;
+          }
+        );
+      };
+      wrapped._ffMem = true;
+      window.fetch = wrapped;
+    }
+
+    const XHR = window.XMLHttpRequest;
+    if (!XHR || XHR.prototype._ffMem) return;
+    const open = XHR.prototype.open;
+    const send = XHR.prototype.send;
+    const setHeader = XHR.prototype.setRequestHeader;
+    XHR.prototype._ffMem = true;
+    XHR.prototype.open = function (method, url) {
+      this._ffRec = { method, url: String(url == null ? "" : url), headers: {} };
+      return open.apply(this, arguments);
+    };
+    XHR.prototype.setRequestHeader = function (k, v) {
+      if (this._ffRec) this._ffRec.headers[k] = v;
+      return setHeader.apply(this, arguments);
+    };
+    XHR.prototype.send = function (body) {
+      const meta = this._ffRec;
+      if (!meta || netNoise(meta.url)) return send.apply(this, arguments);
+      const rec = newNet(meta.method, meta.url);
+      rec.headers = meta.headers || {};
+      rec.reqType = headerGet(rec.headers, "content-type");
+      rec.reqText = serializeBody(body);
+      rec.reqJson = tryJson(rec.reqText);
+      pushNet(rec);
+      this.addEventListener("loadend", function () {
+        let text = "";
+        try {
+          if (!this.responseType || this.responseType === "text")
+            text = String(this.responseText || "");
+          else if (this.responseType === "json")
+            text = this.response != null ? JSON.stringify(this.response) : "";
+          else text = "[" + (this.responseType || "bin") + "]";
+        } catch (_) {
+          text = "[unreadable]";
+        }
+        finishNet(rec, {
+          status: this.status || 0,
+          resType: this.getResponseHeader("content-type") || "",
+          resText: clipBody(text),
+          resJson: tryJson(text),
+        });
+      });
+      return send.apply(this, arguments);
+    };
+  }
+  installNetHook();
 
   function f2(v) {
     return Math.round(v * 100) / 100;
@@ -456,9 +759,13 @@ function ffMemApp() {
       font: 10px Consolas, monospace; color: #4de8ff; letter-spacing: 0; text-align: center;
       text-shadow: 0 0 8px #00e5ff;
     }
-    #ff-hud .menu button .lab { letter-spacing: 2px; }
+    #ff-hud .menu button .lab {
+      display: flex; justify-content: center; align-items: center;
+      letter-spacing: 2px; text-align: center; min-width: 0;
+    }
     #ff-hud .menu button .en {
       font: 9px Consolas, monospace; color: #4a8890; letter-spacing: 1px;
+      justify-self: end; text-align: right; padding-right: 8px; min-width: 3.6em;
     }
     #ff-hud.open .menu button { animation: ffin .42s cubic-bezier(.2,.8,.2,1) forwards; }
     #ff-hud.open .menu button:nth-child(1) { animation-delay: .28s; }
@@ -467,6 +774,9 @@ function ffMemApp() {
     #ff-hud.open .menu button:nth-child(4) { animation-delay: .46s; }
     #ff-hud.open .menu button:nth-child(5) { animation-delay: .52s; }
     #ff-hud.open .menu button:nth-child(6) { animation-delay: .58s; }
+    #ff-hud.open .menu button:nth-child(7) { animation-delay: .64s; }
+    #ff-hud.open .menu button:nth-child(8) { animation-delay: .70s; }
+    #ff-hud.open .menu button:nth-child(9) { animation-delay: .76s; }
     @keyframes ffin {
       from { opacity: 0; filter: blur(8px); }
       to { opacity: 1; filter: none; }
@@ -496,12 +806,21 @@ function ffMemApp() {
     #ff-hud .menu button[data-a="imp"]:hover { background: linear-gradient(90deg, #3a1c10, #071820); }
     #ff-hud .menu button[data-a="imp"]::before { background: #ff9a62; }
     #ff-hud .menu button[data-a="imp"] .idx { color: #ff9a62; }
+    #ff-hud .menu button[data-a="id"]:hover { background: linear-gradient(90deg, #1a3a18, #071820); }
+    #ff-hud .menu button[data-a="id"]::before { background: #9dff7a; }
+    #ff-hud .menu button[data-a="id"] .idx { color: #9dff7a; }
+    #ff-hud .menu button[data-a="purge"]:hover { background: linear-gradient(90deg, #3a1010, #071820); }
+    #ff-hud .menu button[data-a="purge"]::before { background: #ff6b6b; }
+    #ff-hud .menu button[data-a="purge"] .idx { color: #ff6b6b; }
+    #ff-hud .menu button[data-a="net"]:hover { background: linear-gradient(90deg, #10283a, #071820); }
+    #ff-hud .menu button[data-a="net"]::before { background: #4de8ff; }
+    #ff-hud .menu button[data-a="net"] .idx { color: #4de8ff; }
     #ff-hud .hint {
       position: relative; z-index: 3;
       font: 9px Consolas, monospace; color: #4a8890; letter-spacing: 1px;
       text-align: center; padding: 4px 8px 8px; opacity: 0;
     }
-    #ff-hud.open .hint { animation: ffin .3s ease .62s forwards; }
+    #ff-hud.open .hint { animation: ffin .3s ease .82s forwards; }
     #ff-mem-toast {
       position: fixed; left: 50%; bottom: 80px; transform: translateX(-50%) translateY(8px);
       z-index: 2147483647; padding: 8px 14px; font: 12px "Microsoft YaHei", sans-serif;
@@ -513,7 +832,7 @@ function ffMemApp() {
 
     #ff-mem-hist {
       display: none; position: fixed; z-index: 2147483647;
-      width: min(560px, 94vw); max-height: 58vh; overflow: hidden;
+      width: min(640px, 94vw); max-height: 58vh; overflow: hidden;
       color: #c8f7ff; font: 12px/1.4 "Microsoft YaHei", Consolas, sans-serif;
       background:
         linear-gradient(180deg, rgba(0,229,255,.08), transparent 22%),
@@ -565,6 +884,19 @@ function ffMemApp() {
     }
     #ff-mem-hist .wipe:hover { border-color: #f88; box-shadow: 0 0 8px #f844; }
     #ff-mem-hist .wipe:disabled { opacity: .35; cursor: default; box-shadow: none; border-color: #533; }
+    #ff-mem-hist .saveid {
+      border: 1px solid #2ee6ff55; background: #0a2030; color: #9ef6ff;
+      padding: 2px 8px; cursor: pointer; font: 11px "Microsoft YaHei", sans-serif;
+      letter-spacing: 1px;
+    }
+    #ff-mem-hist .saveid:hover { border-color: #7af6ff; box-shadow: 0 0 8px #00e5ff44; }
+    #ff-mem-hist .op.go {
+      color: #061018; background: #5fffc0; border-color: #5fffc0; font-weight: 700;
+    }
+    #ff-mem-hist .op.go:hover { color: #061018; box-shadow: 0 0 10px #5fffc088; }
+    #ff-mem-hist .row.on {
+      border-color: #5fffc077; border-left-color: #5fffc0;
+    }
     #ff-mem-hist .x {
       border: 0; background: transparent; color: #7af6ff; cursor: pointer;
       font-size: 15px; line-height: 1; padding: 2px 4px;
@@ -643,6 +975,32 @@ function ffMemApp() {
       box-shadow: 0 0 16px #00e5ff33 inset;
     }
     #ff-mem-hist .empty p { margin: 0 0 4px; color: #9ef6ff; letter-spacing: 2px; }
+    #ff-mem-hist .net-path {
+      font: 12px Consolas, monospace; color: #e8ffff;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+    }
+    #ff-mem-hist .verb {
+      display: inline-block; min-width: 3.4em; margin-right: 8px; letter-spacing: 1px;
+    }
+    #ff-mem-hist .verb.get { color: #7af6ff; }
+    #ff-mem-hist .verb.post { color: #5fffc0; }
+    #ff-mem-hist .verb.put, #ff-mem-hist .verb.patch { color: #ffd36a; }
+    #ff-mem-hist .verb.delete { color: #ff6b6b; }
+    #ff-mem-hist .st { font-weight: 700; }
+    #ff-mem-hist .st.ok { color: #5fffc0; }
+    #ff-mem-hist .st.err { color: #ff6b6b; }
+    #ff-mem-hist .st.pend { color: #ffd36a; }
+    #ff-mem-hist .row.err { border-left-color: #ff6b6b; }
+    #ff-mem-hist .row.pend { border-left-color: #ffd36a; }
+    #ff-mem-hist .row.open-net { border-color: #7af6ff77; }
+    #ff-mem-hist .dump {
+      grid-column: 1 / -1; margin: 4px 0 0; max-height: 180px; overflow: auto;
+      white-space: pre-wrap; word-break: break-all;
+      font: 11px/1.45 Consolas, monospace; color: #9ef6ff;
+      background: #040c12; padding: 8px 10px; border: 1px solid #1a4a58;
+    }
+    #ff-mem-hist .dump::-webkit-scrollbar { width: 6px; height: 6px; }
+    #ff-mem-hist .dump::-webkit-scrollbar-thumb { background: #2ee6ff55; }
 
     #ff-mem-pick {
       display: none; position: fixed; z-index: 2147483647;
@@ -740,7 +1098,7 @@ function ffMemApp() {
     if (!el) {
       el = document.createElement("div");
       el.id = "ff-mem-toast";
-      document.body.appendChild(el);
+      (document.body || document.documentElement).appendChild(el);
     }
     el.textContent = msg;
     el.classList.add("show");
@@ -1125,6 +1483,72 @@ function ffMemApp() {
     return !name || /^(el-id-|idx_|cb_)/.test(String(name));
   }
 
+  function formFieldNames() {
+    const names = new Set();
+    currentForms().forEach((f) => {
+      Object.keys(f.get() || {}).forEach((k) => {
+        if (!junkField(k)) names.add(k);
+      });
+      const metas = f.kind === "native" ? metasNative() : metasInside(f.el);
+      metas.forEach((m) => {
+        if (m.name && !junkField(m.name)) names.add(m.name);
+      });
+    });
+    return names;
+  }
+
+  function matchFormObj(obj, names) {
+    if (!obj || typeof obj !== "object" || Array.isArray(obj))
+      return { n: 0, data: {}, extra: 0 };
+    const data = {};
+    let extra = 0;
+    Object.keys(obj).forEach((k) => {
+      if (junkField(k)) return;
+      if (names.has(k)) data[k] = obj[k];
+      else extra++;
+    });
+    return { n: Object.keys(data).length, data, extra };
+  }
+
+  function pickFormData(obj) {
+    const names = formFieldNames();
+    if (!names.size) return { n: 0, data: {}, extra: 0 };
+    let best = matchFormObj(obj, names);
+    if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+      ["data", "result", "payload", "form", "model", "records"].forEach((k) => {
+        const v = obj[k];
+        const cand = Array.isArray(v) ? v[0] : v;
+        const t = matchFormObj(cand, names);
+        if (t.n > best.n) best = t;
+      });
+    }
+    return best;
+  }
+
+  async function applyJsonObject(obj, title) {
+    if (obj == null) return toast("没有 JSON");
+    if (typeof obj === "string") {
+      const parsed = tryJson(obj);
+      if (parsed == null) return toast("不是 JSON 对象");
+      obj = parsed;
+    }
+    const picked = pickFormData(obj);
+    if (!picked.n) return toast("对不上当前表单字段");
+    const forms = currentForms();
+    const overlayIdx = forms.findIndex((f) => inOpenOverlay(f.el));
+    const patches = forms.map((f, i) => {
+      if (overlayIdx >= 0) return i === overlayIdx ? picked.data : {};
+      const cur = f.get() || {};
+      const data = {};
+      Object.keys(picked.data).forEach((k) => {
+        if (Object.prototype.hasOwnProperty.call(cur, k)) data[k] = picked.data[k];
+      });
+      return data;
+    });
+    const stat = await applyMerge(patches);
+    toastStats(title, { ok: stat.ok, fail: stat.fail, skip: picked.extra });
+  }
+
   function isVisibleEl(el) {
     if (!el || el.nodeType !== 1) return false;
     const r = el.getBoundingClientRect();
@@ -1138,6 +1562,240 @@ function ffMemApp() {
     const modal = pickTopOverlay();
     if (!modal) return false;
     return modal === el || modal.contains(el);
+  }
+
+  function isHudTree(el) {
+    return !!(el && el.closest && el.closest("#ff-hud, #ff-mem-hist, #ff-mem-pick, #ff-mem-ctx, #ff-mem-toast"));
+  }
+
+  function ownText(el) {
+    return String(el && el.textContent != null ? el.textContent : "").replace(/\s+/g, "");
+  }
+
+  function writeInput(el, v) {
+    if (!el) return;
+    const proto =
+      el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+    if (setter) setter.call(el, v);
+    else el.value = v;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function fieldSig(el) {
+    const wrap = el.closest(".el-form-item, .van-field");
+    return [
+      vueFieldName(el),
+      el.name,
+      el.id,
+      el.placeholder,
+      el.getAttribute("autocomplete"),
+      wrap?.querySelector(".el-form-item__label, .van-field__label")?.textContent,
+    ]
+      .filter((x) => x != null && String(x) !== "")
+      .join(" ")
+      .toLowerCase();
+  }
+
+  function scoreUserField(el) {
+    if (!el || el.type === "password") return -1;
+    const t = String(el.type || "text").toLowerCase();
+    if (!["text", "tel", "email", "number", ""].includes(t)) return -1;
+    const s = fieldSig(el);
+    if (/验证码|captcha|sms.?code|checkcode/.test(s)) return -1;
+    let n = 1;
+    if (/用户名|用户账号|登录名|登陆名|账号|帐号|username|\buser\b|\baccount\b|\blogin\b/.test(s)) n += 6;
+    if (el.autocomplete === "username") n += 5;
+    if (/手机|电话|mobile|phone/.test(s)) n += 3;
+    return n;
+  }
+
+  function visiblePageInputs() {
+    return [...document.querySelectorAll("input")].filter((el) => !isHudTree(el) && isVisibleEl(el));
+  }
+
+  function findLoginBox() {
+    const inputs = visiblePageInputs();
+    const passEl = inputs.find((el) => el.type === "password");
+    if (!passEl) return null;
+    let best = null;
+    let bestScore = -1;
+    inputs.forEach((el) => {
+      if (el === passEl) return;
+      const n = scoreUserField(el);
+      if (n > bestScore) {
+        bestScore = n;
+        best = el;
+      }
+    });
+    if (!best) return null;
+    return {
+      userEl: best,
+      passEl,
+      userKey: vueFieldName(best) || best.name || "",
+      passKey: vueFieldName(passEl) || passEl.name || "",
+    };
+  }
+
+  function hasVisibleCaptcha() {
+    return visiblePageInputs().some((el) => {
+      if (el.type === "password") return false;
+      return /验证码|captcha|sms.?code|checkcode/.test(fieldSig(el));
+    });
+  }
+
+  function findLoginSubmit() {
+    const nodes = [...document.querySelectorAll("button, a, input[type=submit], .el-button")];
+    const scored = [];
+    nodes.forEach((el) => {
+      if (isHudTree(el) || !isVisibleEl(el)) return;
+      const t = ownText(el) || String(el.value || "");
+      if (!t || t.length > 12) return;
+      if (!/登录|登陆|signin|log.?in/i.test(t)) return;
+      if (/登录中|登陆中|退出|注销/.test(t)) return;
+      scored.push(el);
+    });
+    return scored[0] || null;
+  }
+
+  function findLogoutBtn() {
+    const nodes = [
+      ...document.querySelectorAll(
+        "button, a, li, span, p, .el-dropdown-menu__item, .el-menu-item, .el-button"
+      ),
+    ];
+    for (const el of nodes) {
+      if (isHudTree(el)) continue;
+      const t = ownText(el);
+      if (!t || t.length > 8) continue;
+      if (!/^(退出登录|退出登陆|安全退出|注销登录|退出|注销|logout|signout)$/i.test(t)) continue;
+      const hit = el.closest("button, a, li, .el-dropdown-menu__item, .el-menu-item") || el;
+      if (isVisibleEl(hit) || isVisibleEl(el)) return hit;
+    }
+    return null;
+  }
+
+  function findUserTrigger() {
+    const sels = [
+      "header .el-dropdown",
+      ".el-header .el-dropdown",
+      ".navbar .el-dropdown",
+      ".right-menu .el-dropdown",
+      "header .el-avatar",
+      ".navbar .el-avatar",
+      ".navbar .avatar-wrapper",
+      ".avatar-container",
+    ];
+    for (const s of sels) {
+      const el = document.querySelector(s);
+      if (el && !isHudTree(el) && isVisibleEl(el)) {
+        return el.querySelector(".el-dropdown-link, .el-avatar, img") || el;
+      }
+    }
+    return null;
+  }
+
+  function findConfirmOk() {
+    const btns = [
+      ...document.querySelectorAll(
+        ".el-message-box__btns button, .el-popconfirm__action button, .el-overlay .el-button"
+      ),
+    ];
+    const hit = btns
+      .filter((el) => !isHudTree(el) && isVisibleEl(el))
+      .find((el) => /确定|确认|退出|OK|Yes/i.test(ownText(el)));
+    return hit || null;
+  }
+
+  function loginPath() {
+    return location.pathname + location.hash.split("?")[0];
+  }
+
+  function isOursKey(k) {
+    return /^ff_mem_/.test(String(k || ""));
+  }
+
+  function isAuthKey(k) {
+    return /token|auth|jwt|session|access|refresh|permission|roles|userid|user[_-]?info|login[_-]?user|vuex|pinia|admin[_-]?token/i.test(
+      String(k || "")
+    );
+  }
+
+  function wipeStorageKeys(store, pred) {
+    let n = 0;
+    const keys = [];
+    try {
+      for (let i = 0; i < store.length; i++) keys.push(store.key(i));
+    } catch (_) {
+      return 0;
+    }
+    keys.forEach((k) => {
+      if (!k || !pred(k)) return;
+      try {
+        store.removeItem(k);
+        n++;
+      } catch (_) {}
+    });
+    return n;
+  }
+
+  function wipeCookies(pred) {
+    let n = 0;
+    String(document.cookie || "")
+      .split(";")
+      .forEach((part) => {
+        const name = part.split("=")[0].trim();
+        if (!name || isOursKey(name) || (pred && !pred(name))) return;
+        const expire = "expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0";
+        const path = location.pathname || "/";
+        [
+          name + "=; " + expire + "; path=/",
+          name + "=; " + expire + "; path=" + path,
+          name + "=; " + expire + "; path=/; domain=" + location.hostname,
+        ].forEach((c) => {
+          try {
+            document.cookie = c;
+          } catch (_) {}
+        });
+        n++;
+      });
+    return n;
+  }
+
+  async function wipeCacheStorage() {
+    if (!window.caches || typeof caches.keys !== "function") return 0;
+    const keys = await caches.keys();
+    await Promise.all(keys.map((k) => caches.delete(k)));
+    return keys.length;
+  }
+
+  function stripAuth() {
+    const pred = (k) => isAuthKey(k) && !isOursKey(k);
+    wipeStorageKeys(localStorage, pred);
+    wipeStorageKeys(sessionStorage, pred);
+    wipeCookies(pred);
+  }
+
+  async function purgeSite() {
+    if (
+      !window.confirm(
+        "清空本站缓存并重置 token？\n页面会刷新。填核档案和身份档保留。"
+      )
+    )
+      return;
+    setOpen(false);
+    closePanel();
+    const keep = (k) => !isOursKey(k);
+    const ls = wipeStorageKeys(localStorage, keep);
+    const ss = wipeStorageKeys(sessionStorage, keep);
+    const ck = wipeCookies(keep);
+    let cache = 0;
+    try {
+      cache = await wipeCacheStorage();
+    } catch (_) {}
+    toast("已清 " + (ls + ss + ck + cache) + " 项，即将刷新");
+    setTimeout(() => location.reload(), 420);
   }
 
   function unwrapArr(v) {
@@ -1766,6 +2424,14 @@ function ffMemApp() {
     return list.filter((item) => histHaystack(item).includes(s));
   }
 
+  function loadIds() {
+    return parseList(storeGet(idKey));
+  }
+
+  function saveIds(list) {
+    storeSet(idKey, JSON.stringify(list.slice(0, MAX_IDS)));
+  }
+
   function loadHist() {
     return parseList(storeGet(histKey()));
   }
@@ -2018,7 +2684,7 @@ function ffMemApp() {
   }
 
   function renderHist() {
-    if (panel.style.display !== "block") return;
+    if (panel.style.display !== "block" || panelMode !== "hist") return;
     panel.innerHTML =
       '<div class="scan"></div><div class="hd"><span class="mark"></span><span class="ttl">本页档案</span>' +
       '<span class="cnt"></span>' +
@@ -2026,10 +2692,7 @@ function ffMemApp() {
       '<button type="button" class="x" title="关闭">✕</button></div>' +
       '<div class="find"><span class="find-lab">FIND</span><input type="text" spellcheck="false" placeholder="搜备注、字段名或值"></div>' +
       '<div class="bd"></div>';
-    panel.querySelector(".x").onclick = () => {
-      panel.style.display = "none";
-      hud.classList.remove("dock");
-    };
+    panel.querySelector(".x").onclick = closePanel;
     panel.querySelector(".wipe").onclick = clearPageHist;
     const inp = panel.querySelector(".find input");
     inp.value = histQuery;
@@ -2041,7 +2704,7 @@ function ffMemApp() {
   }
 
   function renderHistList(animate) {
-    if (panel.style.display !== "block") return;
+    if (panel.style.display !== "block" || panelMode !== "hist") return;
     const all = loadHist();
     const q = histQuery.trim();
     const list = filterHist(all, q);
@@ -2104,20 +2767,468 @@ function ffMemApp() {
     });
   }
 
+  let panelMode = "hist";
+
+  function closePanel() {
+    panel.style.display = "none";
+    hud.classList.remove("dock");
+  }
+
   function toggleHist() {
-    const open = panel.style.display !== "block";
-    panel.style.display = open ? "block" : "none";
-    if (open) {
-      setOpen(false);
-      pickEl.style.display = "none";
-      pickEl._opts = null;
-      hud.classList.add("dock");
-      renderHist();
-      placePanel();
-      panel.querySelector(".find input")?.focus();
-    } else {
-      hud.classList.remove("dock");
+    togglePanel("hist");
+  }
+
+  function toggleIds() {
+    togglePanel("id");
+  }
+
+  function toggleNet() {
+    togglePanel("net");
+  }
+
+  function togglePanel(mode) {
+    const open = panel.style.display !== "block" || panelMode !== mode;
+    if (!open) {
+      closePanel();
+      return;
     }
+    panelMode = mode;
+    panel.style.display = "block";
+    setOpen(false);
+    pickEl.style.display = "none";
+    pickEl._opts = null;
+    hud.classList.add("dock");
+    if (mode === "id") renderIds();
+    else if (mode === "net") renderNet();
+    else renderHist();
+    placePanel();
+    if (mode === "hist" || mode === "net") panel.querySelector(".find input")?.focus();
+  }
+
+  function copyText(text, ok) {
+    if (text == null || String(text) === "") return toast("没有内容");
+    navigator.clipboard.writeText(String(text)).then(
+      () => toast(ok || "已复制"),
+      () => toast("复制失败")
+    );
+  }
+
+  function shQuote(s) {
+    return "'" + String(s).replace(/'/g, "'\\''") + "'";
+  }
+
+  function buildCurl(rec) {
+    const lines = ["curl -X " + rec.method + " " + shQuote(rec.url)];
+    const ct = headerGet(rec.headers, "content-type");
+    const auth = headerGet(rec.headers, "authorization");
+    const token =
+      headerGet(rec.headers, "token") ||
+      headerGet(rec.headers, "x-token") ||
+      headerGet(rec.headers, "accesstoken");
+    if (ct) lines.push("  -H " + shQuote("Content-Type: " + ct));
+    if (auth) lines.push("  -H " + shQuote("Authorization: " + auth));
+    else if (token) lines.push("  -H " + shQuote("token: " + token));
+    if (rec.reqText && rec.method !== "GET" && rec.method !== "HEAD" && !/^\[(blob|binary)/.test(rec.reqText))
+      lines.push("  --data-raw " + shQuote(rec.reqText));
+    return lines.join(" \\\n");
+  }
+
+  function dumpNet(rec) {
+    return prettyJson({
+      method: rec.method,
+      url: rec.url,
+      status: rec.status,
+      ms: rec.ms,
+      request: rec.reqJson != null ? rec.reqJson : rec.reqText || null,
+      response: rec.resJson != null ? rec.resJson : rec.resText || null,
+    });
+  }
+
+  function netDumpText(rec) {
+    const req = rec.reqJson != null ? prettyJson(rec.reqJson) : rec.reqText || "(empty)";
+    const res = rec.resJson != null ? prettyJson(rec.resJson) : rec.resText || "(empty)";
+    return "REQ\n" + req + "\n\nRES " + (rec.status || "") + "\n" + res;
+  }
+
+  function netPreview(rec) {
+    if (rec.pending) return "进行中…";
+    const msg = rec.resJson && (rec.resJson.msg || rec.resJson.message);
+    if (msg) return String(msg);
+    if (rec.reqJson) return prettyJson(maskJson(rec.reqJson)).replace(/\s+/g, " ").slice(0, 160);
+    if (rec.resText) return rec.resText.replace(/\s+/g, " ").slice(0, 160);
+    return rec.path;
+  }
+
+  function filterNet(list, q) {
+    const s = String(q || "").trim().toLowerCase();
+    if (!s) return list;
+    return list.filter((rec) =>
+      [rec.method, rec.path, rec.url, rec.status, rec.reqText, rec.resText]
+        .join(" ")
+        .toLowerCase()
+        .includes(s)
+    );
+  }
+
+  function clearNet() {
+    if (!netLog.length) return toast("还没有抓到请求");
+    if (!window.confirm("清空 " + netLog.length + " 条抓包？")) return;
+    netLog.length = 0;
+    netOpenId = "";
+    renderNet();
+    toast("已清空抓包");
+  }
+
+  function writeNetReq(rec) {
+    const obj = rec.reqJson != null ? rec.reqJson : tryJson(rec.reqText);
+    if (obj == null) return toast("这条没有请求 JSON");
+    applyJsonObject(obj, "写入请求体");
+  }
+
+  function writeNetRes(rec) {
+    const obj = rec.resJson != null ? rec.resJson : tryJson(rec.resText);
+    if (obj == null) return toast("这条没有响应 JSON");
+    applyJsonObject(obj, "写入响应");
+  }
+
+  function renderNet() {
+    if (panel.style.display !== "block" || panelMode !== "net") return;
+    panel.innerHTML =
+      '<div class="scan"></div><div class="hd"><span class="mark"></span><span class="ttl">请求抓包</span>' +
+      '<span class="cnt"></span>' +
+      '<button type="button" class="wipe" title="清空抓包">清空</button>' +
+      '<button type="button" class="x" title="关闭">✕</button></div>' +
+      '<div class="find"><span class="find-lab">FIND</span><input type="text" spellcheck="false" placeholder="搜路径、状态、请求体或响应"></div>' +
+      '<div class="bd"></div>';
+    panel.querySelector(".x").onclick = closePanel;
+    panel.querySelector(".wipe").onclick = clearNet;
+    const inp = panel.querySelector(".find input");
+    inp.value = netQuery;
+    inp.addEventListener("input", () => {
+      netQuery = inp.value;
+      renderNetList(false);
+    });
+    renderNetList(true);
+  }
+
+  function renderNetList(animate) {
+    if (panel.style.display !== "block" || panelMode !== "net") return;
+    const all = netLog;
+    const q = netQuery.trim();
+    const list = filterNet(all, q);
+    const cnt = panel.querySelector(".cnt");
+    if (cnt) {
+      cnt.innerHTML = q
+        ? list.length + "<i>/" + all.length + "</i>"
+        : all.length + "<i>/" + MAX_NET + "</i>";
+    }
+    const wipe = panel.querySelector(".wipe");
+    if (wipe) wipe.disabled = !all.length;
+    const bd = panel.querySelector(".bd");
+    if (!bd) return;
+    bd.innerHTML = "";
+    if (!all.length) {
+      bd.innerHTML =
+        '<div class="empty"><div class="hex"></div><p>暂无请求</p><span>页面发过接口会出现在这里</span></div>';
+      return;
+    }
+    if (!list.length) {
+      bd.innerHTML =
+        '<div class="empty"><div class="hex"></div><p>没有匹配</p><span>换路径或状态码试试</span></div>';
+      return;
+    }
+    list.forEach((rec, idx) => {
+      const row = document.createElement("div");
+      const kind = rec.pending ? "pend" : rec.status >= 400 || rec.status === 0 ? "err" : "ok";
+      row.className = "row" + (kind === "ok" ? "" : " " + kind) + (netOpenId === rec.id ? " open-net" : "");
+      if (animate) row.style.animationDelay = idx * 0.03 + "s";
+      else row.style.animation = "none";
+      const path = document.createElement("div");
+      path.className = "net-path";
+      const verb = document.createElement("span");
+      verb.className = "verb " + rec.method.toLowerCase();
+      verb.textContent = rec.method;
+      path.append(verb, rec.path);
+      path.title = rec.url;
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      const st = document.createElement("span");
+      st.className = "st " + kind;
+      st.textContent = rec.pending ? "…" : String(rec.status || "ERR");
+      meta.appendChild(st);
+      const ms = document.createElement("span");
+      ms.textContent = rec.pending ? "" : rec.ms + "ms";
+      if (ms.textContent) meta.appendChild(ms);
+      const tm = document.createElement("span");
+      tm.textContent = timeStr(rec.t);
+      meta.appendChild(tm);
+      const ops = document.createElement("div");
+      ops.className = "ops";
+      [
+        ["复制", () => copyText(dumpNet(rec), "已复制该请求"), ""],
+        ["cURL", () => copyText(buildCurl(rec), "已复制 cURL"), ""],
+        ["写入", () => writeNetReq(rec), "go"],
+        ["响应", () => writeNetRes(rec), ""],
+      ].forEach(([text, fn, cls]) => {
+        const b = document.createElement("button");
+        b.className = "op " + cls;
+        b.textContent = text;
+        b.addEventListener("click", (e) => {
+          e.stopPropagation();
+          fn();
+        });
+        ops.appendChild(b);
+      });
+      const preview = document.createElement("div");
+      preview.className = "preview";
+      const pv = netPreview(rec);
+      preview.textContent = pv;
+      preview.title = pv;
+      row.append(path, ops, meta, preview);
+      if (netOpenId === rec.id) {
+        const dump = document.createElement("pre");
+        dump.className = "dump";
+        dump.textContent = netDumpText(rec);
+        row.appendChild(dump);
+      }
+      row.addEventListener("click", (e) => {
+        if (e.target.closest(".op")) return;
+        netOpenId = netOpenId === rec.id ? "" : rec.id;
+        renderNetList(false);
+        requestAnimationFrame(placePanel);
+      });
+      bd.appendChild(row);
+    });
+  }
+
+  function writeLogin(item) {
+    const box = findLoginBox();
+    if (!box) return false;
+    writeInput(box.userEl, item.user);
+    writeInput(box.passEl, item.pass);
+    currentForms().forEach((f) => {
+      const data = { ...(f.get() || {}) };
+      const keys = Object.keys(data);
+      const uk =
+        item.userKey ||
+        box.userKey ||
+        keys.find((k) => /user|account|login|phone|mobile|账号|用户/i.test(k));
+      const pk = item.passKey || box.passKey || keys.find((k) => /pass|pwd|密码/i.test(k));
+      const patch = {};
+      if (uk) patch[uk] = item.user;
+      if (pk) patch[pk] = item.pass;
+      if (!Object.keys(patch).length) return;
+      try {
+        f.set({ ...data, ...patch });
+      } catch (_) {}
+    });
+    return true;
+  }
+
+  function waitForLoginForm(ms) {
+    return new Promise((resolve) => {
+      const t0 = Date.now();
+      const tick = () => {
+        if (findLoginBox()) return resolve(true);
+        if (Date.now() - t0 > ms) return resolve(false);
+        setTimeout(tick, 180);
+      };
+      tick();
+    });
+  }
+
+  async function tryLogout() {
+    let btn = findLogoutBtn();
+    if (!btn) {
+      const trigger = findUserTrigger();
+      if (trigger) {
+        trigger.click();
+        await delay(280);
+        btn = findLogoutBtn();
+      }
+    }
+    if (!btn) return false;
+    btn.click();
+    await delay(220);
+    const ok = findConfirmOk();
+    if (ok) ok.click();
+    return true;
+  }
+
+  async function finishLogin(item) {
+    storeDel(pendingKey);
+    if (!writeLogin(item)) {
+      toast("没找到登录框");
+      return;
+    }
+    await delay(180);
+    if (hasVisibleCaptcha()) {
+      toast("已填「" + item.name + "」，有验证码请手动登录");
+      return;
+    }
+    const btn = findLoginSubmit();
+    if (btn) {
+      btn.click();
+      toast("正在登录「" + item.name + "」");
+      return;
+    }
+    const form = findLoginBox()?.passEl?.closest("form");
+    if (form && typeof form.requestSubmit === "function") {
+      form.requestSubmit();
+      toast("正在登录「" + item.name + "」");
+      return;
+    }
+    toast("已填「" + item.name + "」，请点登录");
+  }
+
+  async function switchLogin(item) {
+    storeSet(lastIdKey, item.id);
+    storeSet(pendingKey, JSON.stringify({ id: item.id, t: Date.now() }));
+    closePanel();
+    setOpen(false);
+    if (findLoginBox()) {
+      await finishLogin(item);
+      return;
+    }
+    toast("正在切换「" + item.name + "」");
+    const did = await tryLogout();
+    if (await waitForLoginForm(did ? 4500 : 500)) {
+      await finishLogin(item);
+      return;
+    }
+    stripAuth();
+    const path = item.loginPath || "/login";
+    const here = loginPath();
+    if (here !== path) {
+      location.assign(location.origin + path);
+      return;
+    }
+    storeDel(pendingKey);
+    toast("没找到登录框，请先打开登录页再点切换");
+  }
+
+  function saveIdentity() {
+    const box = findLoginBox();
+    if (!box) return toast("当前页没有登录框");
+    const user = String(box.userEl.value || "").trim();
+    const pass = String(box.passEl.value || "");
+    if (!user) return toast("账号是空的");
+    if (!pass) return toast("密码是空的，先输入再保存");
+    const name = window.prompt("身份名称", user);
+    if (name == null) return;
+    const item = {
+      id: Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+      name: String(name).trim() || user,
+      user,
+      pass,
+      userKey: box.userKey,
+      passKey: box.passKey,
+      loginPath: loginPath(),
+      time: Date.now(),
+    };
+    const list = loadIds().filter((x) => x.user !== user);
+    saveIds([item, ...list]);
+    storeSet(lastIdKey, item.id);
+    toast("已保存身份「" + item.name + "」");
+    renderIds();
+  }
+
+  function renameId(id, name) {
+    const n = String(name || "").trim();
+    if (!n) return;
+    saveIds(loadIds().map((x) => (x.id === id ? { ...x, name: n } : x)));
+  }
+
+  function delId(id) {
+    saveIds(loadIds().filter((x) => x.id !== id));
+    renderIds();
+  }
+
+  function clearIds() {
+    const n = loadIds().length;
+    if (!n) return toast("还没有身份档");
+    if (!window.confirm("确定清空全部 " + n + " 个身份？")) return;
+    saveIds([]);
+    renderIds();
+    toast("已清空身份档");
+  }
+
+  function renderIds() {
+    if (panel.style.display !== "block" || panelMode !== "id") return;
+    const list = loadIds();
+    const last = storeGet(lastIdKey);
+    panel.innerHTML =
+      '<div class="scan"></div><div class="hd"><span class="mark"></span><span class="ttl">身份档</span>' +
+      '<span class="cnt">' + list.length + "<i>/" + MAX_IDS + "</i></span>" +
+      '<button type="button" class="saveid" title="从当前登录框保存">保存</button>' +
+      '<button type="button" class="wipe" title="清空全部身份">清空</button>' +
+      '<button type="button" class="x" title="关闭">✕</button></div><div class="bd"></div>';
+    panel.querySelector(".x").onclick = closePanel;
+    panel.querySelector(".saveid").onclick = saveIdentity;
+    const wipe = panel.querySelector(".wipe");
+    wipe.disabled = !list.length;
+    wipe.onclick = clearIds;
+    const bd = panel.querySelector(".bd");
+    if (!list.length) {
+      bd.innerHTML =
+        '<div class="empty"><div class="hex"></div><p>暂无身份</p><span>在登录页填好账号密码，点「保存」</span></div>';
+      return;
+    }
+    list.forEach((item, idx) => {
+      const row = document.createElement("div");
+      row.className = "row" + (item.id === last ? " on" : "");
+      row.style.animationDelay = idx * 0.04 + "s";
+      const nameInput = document.createElement("input");
+      nameInput.value = item.name || item.user || "";
+      nameInput.placeholder = "点这里改名称";
+      nameInput.addEventListener("change", () => renameId(item.id, nameInput.value));
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.innerHTML =
+        "<span>" + (item.user || "") + "</span>" +
+        '<span class="chip">••••</span>' +
+        (item.id === last ? '<span class="chip">上次</span>' : "") +
+        (item.loginPath ? "<span>" + item.loginPath + "</span>" : "");
+      const ops = document.createElement("div");
+      ops.className = "ops";
+      [
+        ["切换", () => switchLogin(item), "go"],
+        ["删除", () => delId(item.id), "del"],
+      ].forEach(([text, fn, cls]) => {
+        const b = document.createElement("button");
+        b.className = "op " + cls;
+        b.textContent = text;
+        b.addEventListener("click", fn);
+        ops.appendChild(b);
+      });
+      row.append(nameInput, ops, meta);
+      bd.appendChild(row);
+    });
+  }
+
+  function resumePendingLogin() {
+    const raw = storeGet(pendingKey);
+    if (!raw) return;
+    let pending;
+    try {
+      pending = JSON.parse(raw);
+    } catch {
+      storeDel(pendingKey);
+      return;
+    }
+    if (!pending?.id || Date.now() - (pending.t || 0) > 25000) {
+      storeDel(pendingKey);
+      return;
+    }
+    const item = loadIds().find((x) => x.id === pending.id);
+    if (!item) {
+      storeDel(pendingKey);
+      return;
+    }
+    waitForLoginForm(10000).then((ok) => {
+      if (!ok) return;
+      finishLogin(item);
+    });
   }
 
   const hud = document.createElement("div");
@@ -2137,8 +3248,11 @@ function ffMemApp() {
     '<button type="button" data-a="hist"><span class="idx">04</span><span class="lab">历史</span><span class="en">LOG</span></button>' +
     '<button type="button" data-a="copy"><span class="idx">05</span><span class="lab">复制</span><span class="en">COPY</span></button>' +
     '<button type="button" data-a="imp"><span class="idx">06</span><span class="lab">导入</span><span class="en">IN</span></button>' +
+    '<button type="button" data-a="id" title="Alt+U"><span class="idx">07</span><span class="lab">身份</span><span class="en">ID</span></button>' +
+    '<button type="button" data-a="purge" title="Alt+R 清空缓存并重置 token"><span class="idx">08</span><span class="lab">重置</span><span class="en">PURGE</span></button>' +
+    '<button type="button" data-a="net" title="Alt+N 请求抓包"><span class="idx">09</span><span class="lab">抓包</span><span class="en">NET</span></button>' +
     "</div>" +
-    '<div class="hint">ALT+S/F/V · DRAG</div></div>';
+    '<div class="hint">ALT+S/F/V/U/R/N · DRAG</div></div>';
 
   const core = hud.querySelector(".core");
   hud.querySelector(".menu").addEventListener("click", (e) => {
@@ -2147,6 +3261,9 @@ function ffMemApp() {
     if (a === "fill") fillLatest(e.shiftKey);
     if (a === "mock") virtualFill();
     if (a === "hist") toggleHist();
+    if (a === "id") toggleIds();
+    if (a === "purge") purgeSite();
+    if (a === "net") toggleNet();
     if (a === "copy") copyLatest();
     if (a === "imp") imp();
   });
@@ -2237,7 +3354,7 @@ function ffMemApp() {
   }
 
   function placePanel() {
-    placeBox(panel, 560);
+    placeBox(panel, 640);
     placeBox(pickEl, 420);
   }
 
@@ -2401,16 +3518,22 @@ function ffMemApp() {
     if (e.key === "Escape") {
       hideCtx();
       if (panel.style.display === "block") {
-        if (histQuery) {
+        if ((panelMode === "hist" && histQuery) || (panelMode === "net" && netQuery)) {
           e.preventDefault();
-          histQuery = "";
-          const inp = panel.querySelector(".find input");
-          if (inp) inp.value = "";
-          renderHistList(false);
+          if (panelMode === "net") {
+            netQuery = "";
+            const inp = panel.querySelector(".find input");
+            if (inp) inp.value = "";
+            renderNetList(false);
+          } else {
+            histQuery = "";
+            const inp = panel.querySelector(".find input");
+            if (inp) inp.value = "";
+            renderHistList(false);
+          }
           return;
         }
-        panel.style.display = "none";
-        hud.classList.remove("dock");
+        closePanel();
       }
     }
     if (!e.altKey || e.ctrlKey || e.metaKey) return;
@@ -2424,6 +3547,15 @@ function ffMemApp() {
     } else if (k === "v" && !e.shiftKey) {
       e.preventDefault();
       virtualFill();
+    } else if (k === "u" && !e.shiftKey) {
+      e.preventDefault();
+      toggleIds();
+    } else if (k === "r" && !e.shiftKey) {
+      e.preventDefault();
+      purgeSite();
+    } else if (k === "n" && !e.shiftKey) {
+      e.preventDefault();
+      toggleNet();
     }
   });
 
@@ -2431,6 +3563,8 @@ function ffMemApp() {
   document.documentElement.appendChild(panel);
   document.documentElement.appendChild(pickEl);
   document.documentElement.appendChild(ctx);
+  hudReady = true;
+  resumePendingLogin();
 }
 
 (function boot() {
