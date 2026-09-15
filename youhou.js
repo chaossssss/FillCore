@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         FastForm 填写记忆（Element Plus / Vant）
-// @version      1.2.3
+// @version      1.3.0
 // @match        http://192.168.120.228/*
 // @match        http://192.168.100.156/*
 // @grant        GM_getValue
@@ -14,7 +14,7 @@
 function ffMemApp() {
   "use strict";
 
-  const VERSION = "1.2.3";
+  const VERSION = "1.3.0";
   const MAX_HIST = 30;
   const pageKey = () =>
     "ff_mem_" + location.pathname + location.hash.split("?")[0];
@@ -570,9 +570,28 @@ function ffMemApp() {
       font-size: 15px; line-height: 1; padding: 2px 4px;
     }
     #ff-mem-hist .x:hover { color: #fff; text-shadow: 0 0 8px #7af6ff; }
+    #ff-mem-hist .find {
+      position: relative; z-index: 4;
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 12px 10px 18px;
+      border-bottom: 1px solid #2ee6ff22;
+    }
+    #ff-mem-hist .find-lab {
+      flex: none; font: 10px Consolas, monospace; color: #4a8890; letter-spacing: 1px;
+    }
+    #ff-mem-hist .find input {
+      flex: 1; min-width: 0;
+      background: #071820; border: 1px solid #2ee6ff44; color: #e8ffff;
+      padding: 5px 10px; outline: none;
+      font: 12px "Microsoft YaHei", Consolas, sans-serif;
+    }
+    #ff-mem-hist .find input::placeholder { color: #4a8890; }
+    #ff-mem-hist .find input:focus {
+      border-color: #7af6ff; box-shadow: 0 0 10px #00e5ff33;
+    }
     #ff-mem-hist .bd {
       position: relative; z-index: 1;
-      overflow: auto; max-height: calc(58vh - 48px);
+      overflow: auto; max-height: calc(58vh - 92px);
       padding: 10px 12px 14px;
     }
     #ff-mem-hist .bd::-webkit-scrollbar { width: 6px; }
@@ -1704,14 +1723,47 @@ function ffMemApp() {
     );
   }
 
-  function previewText(payload) {
-    const data = payload.forms?.[0]?.data || {};
+  function previewText(payload, q) {
+    const s = String(q || "").trim().toLowerCase();
+    const pairs = [];
+    (payload.forms || []).forEach((f) => {
+      Object.entries(f.data || {}).forEach(([k, v]) => {
+        pairs.push([k, fmtVal(v)]);
+      });
+    });
+    let ordered = pairs;
+    if (s) {
+      const hit = [];
+      const rest = [];
+      pairs.forEach((p) => {
+        (p[0].toLowerCase().includes(s) || p[1].toLowerCase().includes(s) ? hit : rest).push(p);
+      });
+      ordered = hit.concat(rest);
+    }
     return (
-      Object.entries(data)
+      ordered
         .slice(0, 4)
         .map(([k, v]) => k + "=" + String(v).slice(0, 12))
         .join("；") || "（空）"
     );
+  }
+
+  let histQuery = "";
+
+  function histHaystack(item) {
+    const chunks = [item.note || ""];
+    (item.forms || []).forEach((f) => {
+      Object.entries(f.data || {}).forEach(([k, v]) => {
+        chunks.push(k, fmtVal(v));
+      });
+    });
+    return chunks.join("\n").toLowerCase();
+  }
+
+  function filterHist(list, q) {
+    const s = String(q || "").trim().toLowerCase();
+    if (!s) return list;
+    return list.filter((item) => histHaystack(item).includes(s));
   }
 
   function loadHist() {
@@ -1966,29 +2018,58 @@ function ffMemApp() {
   }
 
   function renderHist() {
-    const list = loadHist();
     if (panel.style.display !== "block") return;
     panel.innerHTML =
       '<div class="scan"></div><div class="hd"><span class="mark"></span><span class="ttl">本页档案</span>' +
-      '<span class="cnt">' + list.length + "<i>/" + MAX_HIST + "</i></span>" +
+      '<span class="cnt"></span>' +
       '<button type="button" class="wipe" title="清空本页历史">清空</button>' +
-      '<button type="button" class="x" title="关闭">✕</button></div><div class="bd"></div>';
+      '<button type="button" class="x" title="关闭">✕</button></div>' +
+      '<div class="find"><span class="find-lab">FIND</span><input type="text" spellcheck="false" placeholder="搜备注、字段名或值"></div>' +
+      '<div class="bd"></div>';
     panel.querySelector(".x").onclick = () => {
       panel.style.display = "none";
       hud.classList.remove("dock");
     };
+    panel.querySelector(".wipe").onclick = clearPageHist;
+    const inp = panel.querySelector(".find input");
+    inp.value = histQuery;
+    inp.addEventListener("input", () => {
+      histQuery = inp.value;
+      renderHistList(false);
+    });
+    renderHistList(true);
+  }
+
+  function renderHistList(animate) {
+    if (panel.style.display !== "block") return;
+    const all = loadHist();
+    const q = histQuery.trim();
+    const list = filterHist(all, q);
+    const cnt = panel.querySelector(".cnt");
+    if (cnt) {
+      cnt.innerHTML = q
+        ? list.length + "<i>/" + all.length + "</i>"
+        : all.length + "<i>/" + MAX_HIST + "</i>";
+      cnt.title = q ? "匹配 " + list.length + " / 共 " + all.length : "";
+    }
     const wipe = panel.querySelector(".wipe");
-    wipe.disabled = !list.length;
-    wipe.onclick = clearPageHist;
+    if (wipe) wipe.disabled = !all.length;
     const bd = panel.querySelector(".bd");
-    if (!list.length) {
+    if (!bd) return;
+    bd.innerHTML = "";
+    if (!all.length) {
       bd.innerHTML = '<div class="empty"><div class="hex"></div><p>暂无记录</p><span>填完表点「保存」</span></div>';
+      return;
+    }
+    if (!list.length) {
+      bd.innerHTML = '<div class="empty"><div class="hex"></div><p>没有匹配</p><span>换个备注或字段值试试</span></div>';
       return;
     }
     list.forEach((item, idx) => {
       const row = document.createElement("div");
       row.className = "row";
-      row.style.animationDelay = idx * 0.04 + "s";
+      if (animate) row.style.animationDelay = idx * 0.04 + "s";
+      else row.style.animation = "none";
       const noteInput = document.createElement("input");
       noteInput.value = item.note || "";
       noteInput.placeholder = "点这里改备注";
@@ -2015,8 +2096,9 @@ function ffMemApp() {
       });
       const preview = document.createElement("div");
       preview.className = "preview";
-      preview.textContent = previewText(item);
-      preview.title = previewText(item);
+      const pv = previewText(item, q);
+      preview.textContent = pv;
+      preview.title = pv;
       row.append(noteInput, ops, meta, preview);
       bd.appendChild(row);
     });
@@ -2032,6 +2114,7 @@ function ffMemApp() {
       hud.classList.add("dock");
       renderHist();
       placePanel();
+      panel.querySelector(".find input")?.focus();
     } else {
       hud.classList.remove("dock");
     }
@@ -2318,6 +2401,14 @@ function ffMemApp() {
     if (e.key === "Escape") {
       hideCtx();
       if (panel.style.display === "block") {
+        if (histQuery) {
+          e.preventDefault();
+          histQuery = "";
+          const inp = panel.querySelector(".find input");
+          if (inp) inp.value = "";
+          renderHistList(false);
+          return;
+        }
         panel.style.display = "none";
         hud.classList.remove("dock");
       }
