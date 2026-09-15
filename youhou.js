@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         FastForm 填写记忆（Element Plus / Vant）
-// @version      1.8.0
+// @version      1.9.3
 // @match        http://192.168.120.228/*
 // @match        http://192.168.100.156/*
 // @grant        GM_getValue
@@ -15,7 +15,7 @@
 function ffMemApp() {
   "use strict";
 
-  const VERSION = "1.8.0";
+  const VERSION = "1.9.3";
   const MAX_HIST = 30;
   const MAX_IDS = 36;
   const MAX_NET = 40;
@@ -28,6 +28,7 @@ function ffMemApp() {
   const oldOriginKey = () =>
     "ff_mem_" + location.origin + location.pathname + location.hash.split("?")[0];
   const recKey = () => pageKey() + "_rec";
+  const histKey = () => pageKey() + "_hist";
   const posKey = "ff_mem_bar_pos";
   const idKey = "ff_mem_ids";
   const idGroupKey = "ff_mem_id_group";
@@ -565,6 +566,8 @@ function ffMemApp() {
       box-shadow: 0 0 0 1px #3dff9a77, 0 0 14px #1aff7033, inset 0 0 10px #0a2a20aa;
       color: #7af6ff;
       display: grid; place-items: center; user-select: none;
+      touch-action: none; -webkit-user-select: none; -webkit-touch-callout: none;
+      -webkit-tap-highlight-color: transparent;
       transition: background .48s ease, box-shadow .48s ease, color .48s ease;
       animation: ffgreencore 1.8s ease-in-out infinite;
     }
@@ -1152,6 +1155,39 @@ function ffMemApp() {
     }
     #ff-mem-ctx button:hover { background: #0c2834; color: #7af6ff; }
     #ff-mem-ctx button[disabled] { color: #4a8890; cursor: default; }
+    @media (max-width: 640px), (hover: none) and (pointer: coarse) {
+      #ff-hud .menu {
+        width: min(200px, calc(100vw - 24px));
+        transform: none !important;
+        filter: none !important;
+        animation: none !important;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: geometricPrecision;
+      }
+      #ff-hud.open .menu {
+        transform: none !important;
+        filter: none !important;
+        animation: none !important;
+      }
+      #ff-hud.open .menu button {
+        animation: none !important;
+        opacity: 1 !important;
+        filter: none !important;
+        transform: none !important;
+        height: 38px;
+        font-size: 15px;
+      }
+      #ff-hud .menu button .lab { letter-spacing: 0; }
+      #ff-hud .menu button .idx {
+        font-size: 11px;
+        text-shadow: none;
+      }
+      #ff-hud .menu button .en { font-size: 10px; }
+      #ff-hud .menu .m-hd { letter-spacing: 1px; font-size: 11px; }
+      #ff-hud .menu .m-ver, #ff-hud .menu .m-tag { font-size: 10px; text-shadow: none; }
+      #ff-hud .menu .m-scan, #ff-hud .menu .m-edge { display: none; }
+      #ff-hud .hint { font-size: 10px; }
+    }
     #ff-mem-cursor {
       display: none; position: fixed; z-index: 2147483646;
       width: 16px; height: 16px; margin: -2px 0 0 -2px;
@@ -2488,6 +2524,7 @@ function ffMemApp() {
   let recMoveAt = 0;
   let recFillT = {};
   let recPage = "";
+  let recDisp = null;
 
   function histHaystack(item) {
     const chunks = [item.note || ""];
@@ -3298,7 +3335,8 @@ function ffMemApp() {
       if (use[0]) return recClickable(use[0]);
     }
     if (typeof fp.x === "number" && typeof fp.y === "number") {
-      const el = document.elementFromPoint(fp.x, fp.y);
+      const pt = recPt(fp.x, fp.y);
+      const el = document.elementFromPoint(pt.x, pt.y);
       if (ok(el)) return recClickable(el);
     }
     return null;
@@ -3314,13 +3352,18 @@ function ffMemApp() {
     return el;
   }
 
+  function recPt(x, y) {
+    const sx = recPlaying && recCursor._vw ? window.innerWidth / recCursor._vw : 1;
+    const sy = recPlaying && recCursor._vh ? window.innerHeight / recCursor._vh : 1;
+    return { x: Math.round((x || 0) * sx), y: Math.round((y || 0) * sy) };
+  }
+
   function recMoveCursor(x, y) {
     const el = recCursor();
     el.style.display = "block";
-    const sx = recPlaying && recCursor._vw ? window.innerWidth / recCursor._vw : 1;
-    const sy = recPlaying && recCursor._vh ? window.innerHeight / recCursor._vh : 1;
-    el.style.left = Math.round(x * sx) + "px";
-    el.style.top = Math.round(y * sy) + "px";
+    const pt = recPt(x, y);
+    el.style.left = pt.x + "px";
+    el.style.top = pt.y + "px";
   }
 
   function recHideCursor() {
@@ -3366,7 +3409,8 @@ function ffMemApp() {
       }
       await delay(180);
     }
-    const under = document.elementFromPoint(step.x, step.y);
+    const pt = recPt(step.x, step.y);
+    const under = document.elementFromPoint(pt.x, pt.y);
     if (under && !isHudTree(under)) {
       recClickable(under).click();
       await delay(260);
@@ -3395,6 +3439,7 @@ function ffMemApp() {
     const lines = [
       "【复现步骤】 " + (item.note || "") + "  " + timeStr(item.time),
       item.path || "",
+      recSizeText(item),
       "",
     ];
     let n = 1;
@@ -3413,6 +3458,123 @@ function ffMemApp() {
     return lines.join("\n");
   }
 
+  function recHere() {
+    return location.pathname + location.hash.split("?")[0];
+  }
+
+  function recDisplay() {
+    return {
+      sw: screen.width,
+      sh: screen.height,
+      vw: window.innerWidth,
+      vh: window.innerHeight,
+      dpr: window.devicePixelRatio || 1,
+    };
+  }
+
+  function recSizeText(item) {
+    if (!item) return "";
+    const bits = [];
+    if (item.sw && item.sh) bits.push(item.sw + "×" + item.sh);
+    if (item.vw && item.vh) bits.push("窗 " + item.vw + "×" + item.vh);
+    if (item.dpr && Number(item.dpr) !== 1) bits.push(item.dpr + "x");
+    return bits.join(" · ");
+  }
+
+  function recSizeDiff(item) {
+    const now = recDisplay();
+    const parts = [];
+    if (item.sw && item.sh && (item.sw !== now.sw || item.sh !== now.sh))
+      parts.push("屏幕 " + item.sw + "×" + item.sh + " → 现在 " + now.sw + "×" + now.sh);
+    if (item.vw && item.vh && (item.vw !== now.vw || item.vh !== now.vh))
+      parts.push("窗口 " + item.vw + "×" + item.vh + " → 现在 " + now.vw + "×" + now.vh);
+    if (item.dpr && Math.abs(Number(item.dpr) - now.dpr) > 0.01)
+      parts.push("缩放 " + item.dpr + " → 现在 " + now.dpr);
+    return parts;
+  }
+
+  function packRec(item) {
+    return {
+      ns: "ff-mem-rec",
+      v: 1,
+      rec: {
+        note: item.note || "",
+        path: item.path || recHere(),
+        sw: item.sw,
+        sh: item.sh,
+        vw: item.vw,
+        vh: item.vh,
+        dpr: item.dpr,
+        steps: item.steps || [],
+        moves: item.moves || [],
+        time: item.time || Date.now(),
+      },
+    };
+  }
+
+  function parseRecPayload(raw) {
+    let data;
+    try {
+      data = JSON.parse(String(raw || ""));
+    } catch {
+      return null;
+    }
+    if (!data || typeof data !== "object") return null;
+    const one = (x) => {
+      if (!x || typeof x !== "object") return null;
+      if (!Array.isArray(x.steps) && !Array.isArray(x.moves)) return null;
+      return {
+        note: x.note || "",
+        path: x.path || "",
+        sw: x.sw,
+        sh: x.sh,
+        vw: x.vw,
+        vh: x.vh,
+        dpr: x.dpr,
+        steps: Array.isArray(x.steps) ? x.steps : [],
+        moves: Array.isArray(x.moves) ? x.moves : [],
+        time: x.time || Date.now(),
+      };
+    };
+    if (data.ns === "ff-mem-rec") {
+      if (Array.isArray(data.recs)) return data.recs.map(one).filter(Boolean);
+      const rec = one(data.rec);
+      return rec ? [rec] : null;
+    }
+    const rec = one(data);
+    return rec ? [rec] : null;
+  }
+
+  function exportRec(id) {
+    const item = loadRecs().find((x) => x.id === id);
+    if (!item) return toast("这条已经不在了");
+    copyText(JSON.stringify(packRec(item), null, 2), "已导出，发给别人导入即可回放");
+  }
+
+  function importRec() {
+    navigator.clipboard.readText().then(
+      (t) => {
+        const list = parseRecPayload(t);
+        if (!list || !list.length) return toast("剪贴板不是录制 JSON");
+        const here = recHere();
+        const extra = list.filter((x) => x.path && x.path !== here);
+        const next = list.map((x, i) => ({
+          ...x,
+          id: Date.now() + "_" + i + "_" + Math.random().toString(36).slice(2, 7),
+          note: x.note || "导入",
+        }));
+        saveRecs([...next, ...loadRecs()].slice(0, MAX_REC));
+        renderRec();
+        if (extra.length)
+          toast(
+            "已导入 " + next.length + " 条。原页面是 " + extra[0].path + "，请先打开该页再回放"
+          );
+        else toast("已导入 " + next.length + " 条，可点回放");
+      },
+      () => toast("读不到剪贴板")
+    );
+  }
+
   function recStart() {
     if (recPlaying) return toast("正在回放");
     recOn = true;
@@ -3422,6 +3584,7 @@ function ffMemApp() {
     recMoveAt = 0;
     recFillT = {};
     recPage = pageKey();
+    recDisp = recDisplay();
     recPaint();
     setOpen(false);
     toast("录制中：鼠标怎么点都会记下。再点「录制」结束");
@@ -3435,17 +3598,22 @@ function ffMemApp() {
     if (!recSteps.length && recMoves.length < 8) {
       recSteps = [];
       recMoves = [];
+      recDisp = null;
       toast("没有录到操作");
       return;
     }
     const note = window.prompt("这条复现怎么称呼？", "复现 " + recSteps.length + " 步") ?? "";
+    const d = recDisp || recDisplay();
     const item = {
       id: Date.now() + "_" + Math.random().toString(36).slice(2, 7),
       time: Date.now(),
       note: String(note).trim() || "复现 " + recSteps.length + " 步",
       path: location.pathname + location.hash.split("?")[0],
-      vw: window.innerWidth,
-      vh: window.innerHeight,
+      sw: d.sw,
+      sh: d.sh,
+      vw: d.vw,
+      vh: d.vh,
+      dpr: d.dpr,
       steps: recSteps.slice(),
       moves: recMoves.slice(),
     };
@@ -3454,7 +3622,8 @@ function ffMemApp() {
     storeSet(key + "_rec", JSON.stringify([item, ...list].slice(0, MAX_REC)));
     recSteps = [];
     recMoves = [];
-    toast("已记下 " + item.steps.length + " 步，Shift+录制可回放");
+    recDisp = null;
+    toast("已记下 " + item.steps.length + " 步 · " + recSizeText(item) + "，可导出给别人回放");
     if (panel.style.display === "block" && panelMode === "rec") renderRec();
   }
 
@@ -3468,7 +3637,11 @@ function ffMemApp() {
     if (!item) return toast("这条已经不在了");
     if (recOn) return toast("先停下录制");
     if (recPlaying) return;
-    if (!window.confirm("按录制回放，会真实点击页面（含提交），用来复现问题。")) return;
+    const diff = recSizeDiff(item);
+    let msg = "按录制回放，会真实点击页面（含提交），用来复现问题。";
+    if (diff.length)
+      msg += "\n\n分辨率不一致：\n" + diff.join("\n") + "\n建议先调成录制时的窗口再回放。";
+    if (!window.confirm(msg)) return;
     recPlaying = true;
     recPaint();
     closePanel();
@@ -3547,17 +3720,19 @@ function ffMemApp() {
       '<div class="scan"></div><div class="hd"><span class="mark"></span><span class="ttl">复现录制</span>' +
       '<span class="cnt">' + list.length + "<i>/" + MAX_REC + "</i></span>" +
       '<button type="button" class="saveid" title="开始或停止录制">录制</button>' +
+      '<button type="button" class="saveid imp-rec" title="从剪贴板导入录制 JSON">导入</button>' +
       '<button type="button" class="wipe" title="清空本页录制">清空</button>' +
       '<button type="button" class="x" title="关闭">✕</button></div><div class="bd"></div>';
     panel.querySelector(".x").onclick = closePanel;
-    panel.querySelector(".saveid").onclick = recToggle;
+    panel.querySelector(".saveid:not(.imp-rec)").onclick = recToggle;
+    panel.querySelector(".imp-rec").onclick = importRec;
     const wipe = panel.querySelector(".wipe");
     wipe.disabled = !list.length;
     wipe.onclick = clearRecs;
     const bd = panel.querySelector(".bd");
     if (!list.length) {
       bd.innerHTML =
-        '<div class="empty"><div class="hex"></div><p>暂无录制</p><span>点「录制」后按复现路径操作，再点一次结束</span></div>';
+        '<div class="empty"><div class="hex"></div><p>暂无录制</p><span>点「录制」走一遍，或「导入」别人的 JSON</span></div>';
       return;
     }
     list.forEach((item, idx) => {
@@ -3575,6 +3750,14 @@ function ffMemApp() {
       chip.className = "chip";
       chip.textContent = (item.steps || []).length + " 步";
       meta.appendChild(chip);
+      const size = recSizeText(item);
+      if (size) {
+        const sc = document.createElement("span");
+        sc.className = "chip";
+        sc.textContent = size;
+        sc.title = "录制时的屏幕 / 窗口 / 缩放";
+        meta.appendChild(sc);
+      }
       if (item.path) {
         const p = document.createElement("span");
         p.textContent = item.path;
@@ -3584,7 +3767,8 @@ function ffMemApp() {
       ops.className = "ops";
       [
         ["回放", () => playRec(item.id), "go"],
-        ["复制", () => copyText(recScript(item), "已复制复现步骤"), ""],
+        ["导出", () => exportRec(item.id), ""],
+        ["步骤", () => copyText(recScript(item), "已复制复现步骤"), ""],
         ["删除", () => delRec(item.id), "del"],
       ].forEach(([text, fn, cls]) => {
         const b = document.createElement("button");
@@ -4081,22 +4265,8 @@ function ffMemApp() {
 
   let drag = null;
   let moved = false;
-  core.addEventListener("mousedown", (e) => {
-    e.preventDefault();
-    const rect = hud.getBoundingClientRect();
-    drag = { dx: e.clientX - rect.left, dy: e.clientY - rect.top };
-    moved = false;
-  });
-  core.addEventListener("dblclick", (e) => {
-    e.preventDefault();
-    resetPos();
-  });
-  window.addEventListener("mousemove", (e) => {
-    if (!drag) return;
-    moved = true;
-    applyPos(e.clientX - drag.dx, e.clientY - drag.dy);
-  });
-  window.addEventListener("mouseup", () => {
+  const DRAG_MIN = 8;
+  function endHudDrag() {
     if (!drag) return;
     if (!moved) setOpen(!hud.classList.contains("open"));
     else {
@@ -4104,6 +4274,30 @@ function ffMemApp() {
       storeSet(posKey, JSON.stringify({ left: rect.left, top: rect.top }));
     }
     drag = null;
+    moved = false;
+  }
+  core.addEventListener("pointerdown", (e) => {
+    if (e.button) return;
+    e.preventDefault();
+    const rect = hud.getBoundingClientRect();
+    drag = { dx: e.clientX - rect.left, dy: e.clientY - rect.top, x: e.clientX, y: e.clientY };
+    moved = false;
+    try {
+      core.setPointerCapture(e.pointerId);
+    } catch (_) {}
+  });
+  core.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const dist = Math.hypot(e.clientX - drag.x, e.clientY - drag.y);
+    if (!moved && dist < DRAG_MIN) return;
+    moved = true;
+    applyPos(e.clientX - drag.dx, e.clientY - drag.dy);
+  });
+  core.addEventListener("pointerup", endHudDrag);
+  core.addEventListener("pointercancel", endHudDrag);
+  core.addEventListener("dblclick", (e) => {
+    e.preventDefault();
+    resetPos();
   });
 
   function fieldFromEvent(e) {
