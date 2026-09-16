@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         填核 HEX
-// @version      1.9.5
+// @version      1.9.6
 // @match        http://192.168.120.228/*
 // @match        http://192.168.100.156/*
 // @grant        GM_getValue
@@ -15,7 +15,7 @@
 function ffMemApp() {
   "use strict";
 
-  const VERSION = "1.9.5";
+  const VERSION = "1.9.6";
   const MAX_HIST = 30;
   const MAX_IDS = 36;
   const MAX_NET = 40;
@@ -1973,7 +1973,8 @@ function ffMemApp() {
     if (root.querySelector(".el-cascader")) return "cascader";
     if (root.querySelector(".el-tree-select")) return "tree-select";
     if (root.querySelector(".el-select, .el-select-v2")) return "select";
-    if (root.querySelector(".el-radio-group")) return "radio";
+    if (root.querySelector(".el-radio-group, .el-radio, .el-radio-button, .van-radio-group, .van-radio"))
+      return "radio";
     if (root.querySelector(".el-checkbox-group")) return "checkbox";
     if (root.querySelector(".el-switch")) return "switch";
     if (root.querySelector(".el-rate")) return "rate";
@@ -1987,6 +1988,46 @@ function ffMemApp() {
     if (typeof Map !== "undefined" && v instanceof Map) return [...v.values()];
     if (Array.isArray(v.value)) return v.value;
     return [];
+  }
+
+  function harvestChoiceOptions(item) {
+    if (!item || !item.querySelectorAll) return [];
+    const nodes = [
+      ...item.querySelectorAll(".el-radio, .el-radio-button, .van-radio, .el-checkbox, .el-checkbox-button"),
+    ];
+    const out = [];
+    const seen = new Set();
+    nodes.forEach((el) => {
+      const wrap = el.closest(".el-form-item, .van-field");
+      if (wrap && wrap !== item) return;
+      let value;
+      let inst = el.__vueParentComponent;
+      for (let i = 0; inst && i < 8; i++, inst = inst.parent) {
+        const n = inst.type?.name || inst.type?.__name || "";
+        if (/Group|Select|FormItem|Form$|Table/i.test(n) && !/Radio|Checkbox/i.test(n)) break;
+        if (/^(ElRadio|ElRadioButton|VanRadio|ElCheckbox|ElCheckboxButton)$/i.test(n)) {
+          const p = inst.props || {};
+          value = p.label != null ? p.label : p.value;
+          break;
+        }
+      }
+      const inp = el.querySelector('input[type="radio"], input[type="checkbox"]');
+      if (value == null && inp && inp.value !== "") value = inp.value;
+      const text = (
+        el.querySelector(
+          ".el-radio__label, .el-radio-button__inner, .el-checkbox__label, .el-checkbox-button__inner, .van-radio__label"
+        )?.textContent || ""
+      )
+        .replace(/\s+/g, " ")
+        .trim();
+      if (value == null) value = text;
+      if (value == null || value === "") return;
+      const key = String(value);
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({ value, label: text || key });
+    });
+    return out;
   }
 
   function harvestOptions(item) {
@@ -2013,7 +2054,17 @@ function ffMemApp() {
         if (arr.length) return arr;
       }
     }
-    return [];
+    return harvestChoiceOptions(item);
+  }
+
+  function mergeOpts(a, b) {
+    const aa = optionList(a);
+    const bb = optionList(b);
+    if (!aa.length) return bb.length ? bb : a || b;
+    if (!bb.length) return aa;
+    const seen = new Set(aa.map((o) => String(optVal(o))));
+    const extra = bb.filter((o) => !seen.has(String(optVal(o))));
+    return extra.length ? aa.concat(extra) : aa;
   }
 
   function walkSchema(schema, out) {
@@ -2065,7 +2116,7 @@ function ffMemApp() {
         type: preferType(m.type, prev.type),
         label: m.label || prev.label,
         placeholder: m.placeholder || prev.placeholder,
-        options: m.options || prev.options,
+        options: mergeOpts(m.options, prev.options),
         valueFormat: m.valueFormat || m["value-format"] || prev.valueFormat,
         isRange: m.isRange || m["is-range"] || prev.isRange,
         startPlaceholder: m.startPlaceholder || m["start-placeholder"] || prev.startPlaceholder,
@@ -2081,14 +2132,25 @@ function ffMemApp() {
       let type = p.type;
       if (!type && /TreeSelect/i.test(cname)) type = "tree-select";
       else if (!type && /Cascader/i.test(cname)) type = "cascader";
+      else if (!type && /RadioGroup/i.test(cname)) type = "radio";
+      else if (!type && /CheckboxGroup/i.test(cname)) type = "checkbox";
       else if (!type && /Select/i.test(cname) && !/Option/i.test(cname)) type = "select";
+      const optionChild = /^(ElRadio|ElRadioButton|VanRadio|ElCheckbox|ElCheckboxButton)$/i.test(cname);
       if (name) {
         add({
           name,
-          type,
-          label: typeof p.label === "string" ? p.label : typeof p.title === "string" ? p.title : "",
+          type: optionChild ? (/Checkbox/i.test(cname) ? "checkbox" : "radio") : type,
+          label: optionChild
+            ? ""
+            : typeof p.label === "string"
+              ? p.label
+              : typeof p.title === "string"
+                ? p.title
+                : "",
           placeholder: p.placeholder,
-          options: p.options || p.dicData || (/Select|Cascader|Radio|Checkbox/i.test(cname) ? p.data : null),
+          options: optionChild
+            ? [{ value: p.label != null ? p.label : p.value, label: p.label }]
+            : p.options || p.dicData || (/Select|Cascader|Radio|Checkbox/i.test(cname) ? p.data : null),
           valueFormat: p.valueFormat || p["value-format"],
           isRange: p.isRange || p["is-range"],
           startPlaceholder: p.startPlaceholder || p["start-placeholder"],
