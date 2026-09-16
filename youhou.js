@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         填核 HEX
-// @version      1.9.3
+// @version      1.9.5
 // @match        http://192.168.120.228/*
 // @match        http://192.168.100.156/*
 // @grant        GM_getValue
@@ -15,7 +15,7 @@
 function ffMemApp() {
   "use strict";
 
-  const VERSION = "1.9.3";
+  const VERSION = "1.9.5";
   const MAX_HIST = 30;
   const MAX_IDS = 36;
   const MAX_NET = 40;
@@ -557,10 +557,12 @@ function ffMemApp() {
       font-family: "Microsoft YaHei", Consolas, sans-serif;
       color: #c8f7ff;
       right: 18px; bottom: 18px;
+      pointer-events: none;
     }
     #ff-hud .core {
       width: 46px; height: 46px; border: 0; cursor: grab; padding: 0;
       position: relative;
+      pointer-events: auto;
       background: radial-gradient(circle at 50% 48%, #0c221c 0%, #061018 72%);
       clip-path: polygon(50% 0%, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
       box-shadow: 0 0 0 1px #3dff9a77, 0 0 14px #1aff7033, inset 0 0 10px #0a2a20aa;
@@ -709,6 +711,10 @@ function ffMemApp() {
     #ff-hud.dock .menu {
       opacity: 0 !important; visibility: hidden !important; pointer-events: none !important;
       transition: none !important; animation: none !important; filter: none !important;
+    }
+    #ff-hud.pass .core,
+    #ff-hud.pass.open .menu {
+      pointer-events: none !important;
     }
     @keyframes ffholo {
       0%, 100% { filter: brightness(1); }
@@ -1333,8 +1339,7 @@ function ffMemApp() {
     document.querySelectorAll("input, textarea, select").forEach((el, i) => {
       if (["password", "file", "hidden", "submit", "button"].includes(el.type))
         return;
-      if (el.closest(".el-select, .el-date-editor, .el-cascader, .van-picker"))
-        return;
+      if (isWidgetChrome(el)) return;
       if (el.type === "checkbox") {
         data[el.name || "cb_" + i] = el.checked;
         return;
@@ -1352,7 +1357,7 @@ function ffMemApp() {
   function nativeFill(data, onlyEmpty) {
     document.querySelectorAll("input, textarea, select").forEach((el, i) => {
       if (["password", "file"].includes(el.type)) return;
-      if (el.closest(".el-select, .el-date-editor, .el-cascader")) return;
+      if (isWidgetChrome(el)) return;
       const proto =
         el.tagName === "TEXTAREA"
           ? HTMLTextAreaElement.prototype
@@ -1474,6 +1479,7 @@ function ffMemApp() {
       const p = inst.props || {};
       if (p.name != null && p.name !== "") return String(p.name);
       if (p.prop != null && p.prop !== "") return String(p.prop);
+      if (p.field != null && p.field !== "") return String(p.field);
       inst = inst.parent;
       depth++;
     }
@@ -1676,6 +1682,27 @@ function ffMemApp() {
     return !!(el && el.closest && el.closest("#ff-hud, #ff-mem-hist, #ff-mem-pick, #ff-mem-ctx, #ff-mem-toast"));
   }
 
+  function isWidgetChrome(el) {
+    return !!(
+      el &&
+      el.closest &&
+      el.closest(
+        ".el-select, .el-select-dropdown, .el-date-editor, .el-picker-panel, .el-time-panel, .el-cascader, .el-cascader__dropdown, .el-tree-select, .el-autocomplete, .el-autocomplete-suggestion, .van-picker"
+      )
+    );
+  }
+
+  function isPickOpen() {
+    return pickEl.style.display === "flex";
+  }
+
+  function popperHost(el) {
+    if (!(el instanceof Element)) return null;
+    return el.closest(
+      ".el-select, .el-select-dropdown, .el-date-editor, .el-picker-panel, .el-time-panel, .el-cascader, .el-cascader__dropdown, .el-tree-select, .el-autocomplete, .el-autocomplete-suggestion"
+    );
+  }
+
   function ownText(el) {
     return String(el && el.textContent != null ? el.textContent : "").replace(/\s+/g, "");
   }
@@ -1720,7 +1747,9 @@ function ffMemApp() {
   }
 
   function visiblePageInputs() {
-    return [...document.querySelectorAll("input")].filter((el) => !isHudTree(el) && isVisibleEl(el));
+    return [...document.querySelectorAll("input")].filter(
+      (el) => !isHudTree(el) && !isWidgetChrome(el) && isVisibleEl(el)
+    );
   }
 
   function findLoginBox() {
@@ -1939,14 +1968,73 @@ function ffMemApp() {
     return "";
   }
 
+  function widgetType(root) {
+    if (!root || !root.querySelector) return "";
+    if (root.querySelector(".el-cascader")) return "cascader";
+    if (root.querySelector(".el-tree-select")) return "tree-select";
+    if (root.querySelector(".el-select, .el-select-v2")) return "select";
+    if (root.querySelector(".el-radio-group")) return "radio";
+    if (root.querySelector(".el-checkbox-group")) return "checkbox";
+    if (root.querySelector(".el-switch")) return "switch";
+    if (root.querySelector(".el-rate")) return "rate";
+    if (root.querySelector(".el-slider")) return "slider";
+    return dateEditorType(root);
+  }
+
+  function optionList(v) {
+    if (!v) return [];
+    if (Array.isArray(v)) return v;
+    if (typeof Map !== "undefined" && v instanceof Map) return [...v.values()];
+    if (Array.isArray(v.value)) return v.value;
+    return [];
+  }
+
+  function harvestOptions(item) {
+    if (!item) return [];
+    const sel =
+      item.querySelector &&
+      item.querySelector(".el-select, .el-cascader, .el-tree-select, .el-radio-group, .el-select-v2");
+    let inst = (sel || item).__vueParentComponent;
+    for (let i = 0; inst && i < 18; i++, inst = inst.parent) {
+      const n = inst.type?.name || inst.type?.__name || "";
+      if (/^(ElTable|ElForm|ElDialog|ElDrawer|VanForm)/.test(n)) break;
+      const p = inst.props || {};
+      const lists = [p.options, p.dicData];
+      if (/Select|Cascader|Radio|Checkbox/i.test(n)) {
+        lists.push(
+          p.data,
+          inst.setupState && inst.setupState.options,
+          inst.setupState && inst.setupState.states && inst.setupState.states.options,
+          inst.exposed && inst.exposed.options
+        );
+      }
+      for (let j = 0; j < lists.length; j++) {
+        const arr = optionList(lists[j]).filter((o) => o != null && o !== "");
+        if (arr.length) return arr;
+      }
+    }
+    return [];
+  }
+
   function walkSchema(schema, out) {
     for (const item of unwrapArr(schema)) {
       if (!item || typeof item !== "object") continue;
-      if (item.name && (item.type || item.label)) out.push(item);
+      const name = item.name || item.field || item.prop;
+      const label = item.label || item.title;
+      const type = item.type;
+      if (name && (type || label))
+        out.push({
+          ...item,
+          name,
+          label: label || item.label,
+          type,
+          options: item.options || item.dicData || item.data,
+        });
       walkSchema(item.schema, out);
       walkSchema(item.children, out);
       walkSchema(item.fields, out);
       walkSchema(item.columns, out);
+      walkSchema(item.rule, out);
     }
   }
 
@@ -1954,7 +2042,16 @@ function ffMemApp() {
     const out = [];
     const p = inst?.props || {};
     const proxy = inst?.proxy || {};
-    walkSchema(p.schema || p.fields || proxy.schema, out);
+    const exp = inst?.exposed || {};
+    walkSchema(p.schema, out);
+    walkSchema(p.fields, out);
+    walkSchema(p.rule, out);
+    walkSchema(p.column, out);
+    walkSchema(p.option && p.option.rule, out);
+    walkSchema(proxy.schema, out);
+    walkSchema(proxy.rule, out);
+    walkSchema(exp.schema, out);
+    walkSchema(exp.rule, out);
     return out;
   }
 
@@ -1979,14 +2076,19 @@ function ffMemApp() {
       const el = rootEl(inst);
       if (formEl && (!el || (el !== formEl && !formEl.contains(el)))) continue;
       const p = inst.props || {};
-      const name = p.name || p.prop;
+      const cname = inst.type?.name || inst.type?.__name || "";
+      const name = p.name || p.prop || p.field || vueFieldName(el);
+      let type = p.type;
+      if (!type && /TreeSelect/i.test(cname)) type = "tree-select";
+      else if (!type && /Cascader/i.test(cname)) type = "cascader";
+      else if (!type && /Select/i.test(cname) && !/Option/i.test(cname)) type = "select";
       if (name) {
         add({
           name,
-          type: p.type,
-          label: typeof p.label === "string" ? p.label : "",
+          type,
+          label: typeof p.label === "string" ? p.label : typeof p.title === "string" ? p.title : "",
           placeholder: p.placeholder,
-          options: p.options,
+          options: p.options || p.dicData || (/Select|Cascader|Radio|Checkbox/i.test(cname) ? p.data : null),
           valueFormat: p.valueFormat || p["value-format"],
           isRange: p.isRange || p["is-range"],
           startPlaceholder: p.startPlaceholder || p["start-placeholder"],
@@ -2007,8 +2109,12 @@ function ffMemApp() {
         add({
           name,
           label,
-          type: dateEditorType(item) || (control?.tagName === "TEXTAREA" ? "textarea" : control?.type),
+          type:
+            widgetType(item) ||
+            dateEditorType(item) ||
+            (control?.tagName === "TEXTAREA" ? "textarea" : control?.type),
           placeholder: control?.placeholder,
+          options: harvestOptions(item),
         });
     });
     return [...map.values()];
@@ -2018,6 +2124,7 @@ function ffMemApp() {
     const metas = [];
     document.querySelectorAll("input, textarea, select").forEach((el, i) => {
       if (["password", "file", "hidden", "submit", "button"].includes(el.type)) return;
+      if (isWidgetChrome(el) || isHudTree(el)) return;
       const wrap = el.closest(".el-form-item, .van-field");
       const label = (
         wrap?.querySelector(".el-form-item__label, .van-field__label")?.textContent ||
@@ -2026,9 +2133,13 @@ function ffMemApp() {
       ).trim();
       metas.push({
         name: el.name || (!junkField(el.id) && el.id) || "idx_" + i,
-        type: dateEditorType(wrap) || (el.tagName === "TEXTAREA" ? "textarea" : el.type),
+        type:
+          widgetType(wrap) ||
+          dateEditorType(wrap) ||
+          (el.tagName === "TEXTAREA" ? "textarea" : el.type),
         label,
         placeholder: el.placeholder,
+        options: harvestOptions(wrap),
       });
     });
     return metas;
@@ -2080,7 +2191,16 @@ function ffMemApp() {
     if (t === "rate") return "rate";
     if (t === "slider") return "slider";
     if (t === "checkbox") return "options-multi";
-    if (t === "radio" || t === "select" || t === "cascader" || t === "tree-select") return "option";
+    if (
+      t === "radio" ||
+      t === "select" ||
+      t === "cascader" ||
+      t === "treeselect" ||
+      t === "dictselect" ||
+      t === "selectv2"
+    )
+      return "option";
+    if (optionsOf(meta).length) return t === "checkbox" ? "options-multi" : "option";
     if (t === "textarea") return "remark";
     if (t === "digit" || t === "number" || t === "input-number") {
       return /金额|价格|费用|amount|price|money|fee/.test(s) ? "amount" : "number";
@@ -2279,9 +2399,11 @@ function ffMemApp() {
     return o.text ?? o.label;
   }
   function optionsOf(meta) {
-    return unwrapArr(meta.options).filter((o) => {
+    return optionList(meta && meta.options).filter((o) => {
       const v = optVal(o);
-      return v !== "" && v != null;
+      if (v === "" || v == null) return false;
+      if (o && typeof o === "object" && o.disabled) return false;
+      return true;
     });
   }
   function firstOption(meta) {
@@ -2350,7 +2472,8 @@ function ffMemApp() {
       return a <= b ? [a, b] : [b, a];
     }
     if (kind === "option") {
-      if (String(meta.type).toLowerCase() === "cascader") return firstCascade(meta);
+      const tp = String(meta.type || "").toLowerCase();
+      if (tp === "cascader" || tp === "tree-select") return firstCascade(meta);
       return firstOption(meta);
     }
     if (kind === "options-multi") {
@@ -2731,10 +2854,13 @@ function ffMemApp() {
 
   const panel = document.createElement("div");
   panel.id = "ff-mem-hist";
+  panel.style.display = "none";
   const pickEl = document.createElement("div");
   pickEl.id = "ff-mem-pick";
+  pickEl.style.display = "none";
   const ctx = document.createElement("div");
   ctx.id = "ff-mem-ctx";
+  ctx.style.display = "none";
   ctx.innerHTML =
     '<button type="button" data-a="mock1">虚拟此字段</button>' +
     '<button type="button" data-a="fill1">回填此字段</button>';
@@ -4497,7 +4623,7 @@ function ffMemApp() {
   );
 
   window.addEventListener("keydown", (e) => {
-    if (pickEl.style.display !== "none") {
+    if (isPickOpen()) {
       if (e.key === "Escape") {
         e.preventDefault();
         hidePick();
@@ -4564,6 +4690,28 @@ function ffMemApp() {
       else recToggle();
     }
   });
+
+  function hudPassFromEvent(e) {
+    const t = e.target;
+    if (!(t instanceof Element) || isHudTree(t)) return false;
+    return !!popperHost(t);
+  }
+  document.addEventListener(
+    "focusin",
+    (e) => {
+      if (hudPassFromEvent(e)) hud.classList.add("pass");
+    },
+    true
+  );
+  document.addEventListener(
+    "mousedown",
+    (e) => {
+      if (hudPassFromEvent(e)) hud.classList.add("pass");
+      else if (!(e.target instanceof Element) || !isHudTree(e.target))
+        hud.classList.remove("pass");
+    },
+    true
+  );
 
   document.documentElement.appendChild(hud);
   document.documentElement.appendChild(panel);
