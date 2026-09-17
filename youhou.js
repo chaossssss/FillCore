@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         填核 HEX
-// @version      1.9.7
+// @version      1.10.0
 // @match        http://192.168.120.228/*
 // @match        http://192.168.100.156/*
 // @grant        GM_getValue
@@ -15,7 +15,7 @@
 function ffMemApp() {
   "use strict";
 
-  const VERSION = "1.9.7";
+  const VERSION = "1.10.0";
   const MAX_HIST = 30;
   const MAX_IDS = 36;
   const MAX_NET = 40;
@@ -1221,10 +1221,10 @@ function ffMemApp() {
   }
 
   function toastStats(head, s) {
-    toast(
-      head + " 成功 " + (s.ok || 0) + " · 跳过 " + (s.skip || 0) + " · 失败 " + (s.fail || 0),
-      2800
-    );
+    let msg =
+      head + " 成功 " + (s.ok || 0) + " · 跳过 " + (s.skip || 0) + " · 失败 " + (s.fail || 0);
+    if (s.link) msg += " · 联动 " + s.link;
+    toast(msg, s.link ? 3200 : 2800);
   }
 
   function collectVnodes(vnode, stack) {
@@ -2644,6 +2644,157 @@ function ffMemApp() {
     return { planned, skip, engine: forms[0]?.kind };
   }
 
+  function actionScope() {
+    return pickTopOverlay() || currentForms()[0]?.el || document.body;
+  }
+
+  function isDisabledBtn(el) {
+    if (!el) return true;
+    return !!(
+      el.disabled ||
+      el.getAttribute("disabled") != null ||
+      el.classList.contains("is-disabled") ||
+      el.getAttribute("aria-disabled") === "true"
+    );
+  }
+
+  function clickEl(el) {
+    if (!el || isDisabledBtn(el) || isHudTree(el)) return false;
+    const hit =
+      el.closest("button, .el-button, .van-button, a, [role=button]") || el;
+    if (isDisabledBtn(hit)) return false;
+    hit.click();
+    return true;
+  }
+
+  function findEditTables(root) {
+    if (!root || !root.querySelectorAll) return [];
+    return [...root.querySelectorAll(".el-table, .el-table-v2")].filter(
+      (el) => isVisibleEl(el) && !isHudTree(el)
+    );
+  }
+
+  function tableBodyRows(table) {
+    return [...table.querySelectorAll(".el-table__body tbody tr.el-table__row")].filter(
+      (r) => isVisibleEl(r)
+    );
+  }
+
+  function tableAddButton(table) {
+    const hosts = [];
+    const item = table.closest(".el-form-item, .van-field, .el-card, .el-tab-pane");
+    if (item) hosts.push(item);
+    if (table.parentElement) hosts.push(table.parentElement);
+    if (table.parentElement && table.parentElement.parentElement)
+      hosts.push(table.parentElement.parentElement);
+    const seen = new Set();
+    const btns = [];
+    hosts.forEach((h) => {
+      [...h.querySelectorAll("button, .el-button, .van-button")].forEach((b) => {
+        if (seen.has(b) || table.contains(b)) return;
+        if (!isVisibleEl(b) || isHudTree(b) || isDisabledBtn(b)) return;
+        seen.add(b);
+        btns.push(b);
+      });
+    });
+    return btns.find((b) => /^(新增|添加|增加)(一行|一条|记录|行)?$/.test(ownText(b)));
+  }
+
+  function wizardNextButton(root) {
+    if (!root || !root.querySelectorAll) return null;
+    const hasSteps = root.querySelector(
+      ".el-steps, .el-step, .van-steps, .van-step, [class*='wizard'], [class*='step-']"
+    );
+    const btns = [...root.querySelectorAll("button, .el-button, .van-button")].filter(
+      (b) => isVisibleEl(b) && !isHudTree(b) && !isDisabledBtn(b)
+    );
+    const next = btns.find((b) => /^(下一步|下一项|继续)$/.test(ownText(b)));
+    if (next) return next;
+    if (!hasSteps) return null;
+    return btns.find((b) => /下一步|下一项/.test(ownText(b)));
+  }
+
+  function mockTableRows(data) {
+    const patch = {};
+    Object.keys(data || {}).forEach((k) => {
+      const v = data[k];
+      if (!Array.isArray(v) || !v.length) return;
+      const row = v[v.length - 1];
+      if (!row || typeof row !== "object" || Array.isArray(row)) return;
+      const next = { ...row };
+      let changed = false;
+      Object.keys(row).forEach((ck) => {
+        if (junkField(ck) || !isEmpty(row[ck])) return;
+        const meta = { name: ck, label: ck, type: "" };
+        const kind = inferKind(meta);
+        if (!kind) return;
+        const mv = mockValue(kind, meta);
+        if (mv === undefined) return;
+        next[ck] = mv;
+        changed = true;
+      });
+      if (!changed) return;
+      const arr = v.slice();
+      arr[arr.length - 1] = next;
+      patch[k] = arr;
+    });
+    return patch;
+  }
+
+  function patchSize(patches) {
+    return (patches || []).reduce((s, p) => s + Object.keys(p || {}).length, 0);
+  }
+
+  async function ensureTableRows() {
+    const root = actionScope();
+    let n = 0;
+    findEditTables(root).forEach((table) => {
+      const rows = tableBodyRows(table);
+      const empty = table.querySelector(".el-table__empty-block");
+      if (rows.length && !empty) return;
+      if (clickEl(tableAddButton(table))) n++;
+    });
+    return n;
+  }
+
+  async function runBoost() {
+    let ok = 0;
+    let fail = 0;
+    let n = 0;
+    let wizardClicks = 0;
+    for (let r = 0; r < 5; r++) {
+      const added = await ensureTableRows();
+      if (added) {
+        n += added;
+        await delay(380);
+      }
+      const planned = planVirtual().planned;
+      const formsNow = currentForms();
+      const patches = planned.map((p, i) => {
+        const cur = (formsNow[i] && formsNow[i].get()) || p.current || {};
+        return { ...(p.mock || {}), ...mockTableRows(cur) };
+      });
+      const size = patchSize(patches);
+      if (size) {
+        n += size;
+        const stat = await applyMerge(patches);
+        ok += stat.ok || 0;
+        fail += stat.fail || 0;
+        continue;
+      }
+      const next = wizardNextButton(actionScope());
+      if (next && wizardClicks < 3) {
+        if (!clickEl(next)) break;
+        wizardClicks++;
+        n++;
+        await delay(480);
+        continue;
+      }
+      break;
+    }
+    return { ok, fail, n };
+  }
+
   function latestPayload() {
     const list = loadHist();
     if (list[0]) return { engine: list[0].engine, forms: list[0].forms, note: list[0].note, time: list[0].time };
@@ -2677,7 +2828,12 @@ function ffMemApp() {
   async function virtualFill() {
     const { planned, skip } = planVirtual();
     const entries = planned.flatMap((p) => p.rows);
-    if (!entries.length) return toast(skip ? "空字段里没有可虚拟的项" : "没有识别到可填的空字段");
+    if (!entries.length) {
+      const boost = await runBoost();
+      if (boost.n)
+        return toastStats("虚拟", { ok: boost.ok, fail: boost.fail, skip, link: boost.n });
+      return toast(skip ? "空字段里没有可虚拟的项" : "没有识别到可填的空字段");
+    }
     openPick({
       title: "虚拟预览",
       entries,
@@ -2700,7 +2856,13 @@ function ffMemApp() {
         if (overlayIdx >= 0) patches[overlayIdx] = { ...patches[overlayIdx], ...dataAll };
         const unchecked = picked.filter((e) => !e.checked).length;
         const stat = await applyMerge(patches);
-        toastStats("虚拟", { ok: stat.ok, fail: stat.fail, skip: skip + unchecked });
+        const boost = await runBoost();
+        toastStats("虚拟", {
+          ok: stat.ok + boost.ok,
+          fail: stat.fail + boost.fail,
+          skip: skip + unchecked,
+          link: boost.n,
+        });
       },
     });
   }
@@ -2846,7 +3008,13 @@ function ffMemApp() {
   async function applyPayload(payload, title) {
     const patches = (payload.forms || [{ data: payload }]).map((f) => f.data || {});
     const stat = await applyMerge(patches);
-    toastStats("回填「" + title + "」", { ok: stat.ok, fail: stat.fail, skip: 0 });
+    const boost = await runBoost();
+    toastStats("回填「" + title + "」", {
+      ok: stat.ok + boost.ok,
+      fail: stat.fail + boost.fail,
+      skip: 0,
+      link: boost.n,
+    });
   }
 
   function fillLatest(pick) {
@@ -2884,7 +3052,13 @@ function ffMemApp() {
         });
         const unchecked = picked.filter((e) => !e.checked).length;
         const stat = await applyMerge(patches);
-        toastStats("回填「" + title + "」", { ok: stat.ok, fail: stat.fail, skip: unchecked });
+        const boost = await runBoost();
+        toastStats("回填「" + title + "」", {
+          ok: stat.ok + boost.ok,
+          fail: stat.fail + boost.fail,
+          skip: unchecked,
+          link: boost.n,
+        });
       },
     });
   }
