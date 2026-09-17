@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         填核 HEX
-// @version      1.9.6
+// @version      1.9.7
 // @match        http://192.168.120.228/*
 // @match        http://192.168.100.156/*
 // @grant        GM_getValue
@@ -15,7 +15,7 @@
 function ffMemApp() {
   "use strict";
 
-  const VERSION = "1.9.6";
+  const VERSION = "1.9.7";
   const MAX_HIST = 30;
   const MAX_IDS = 36;
   const MAX_NET = 40;
@@ -1372,6 +1372,11 @@ function ffMemApp() {
       if (el.type === "checkbox") {
         if (onlyEmpty && el.checked) return;
         const v = data[el.name || "cb_" + i];
+        if (Array.isArray(v)) {
+          el.checked = v.map(String).includes(String(el.value));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+          return;
+        }
         if (typeof v === "boolean") {
           el.checked = v;
           el.dispatchEvent(new Event("change", { bubbles: true }));
@@ -1975,11 +1980,31 @@ function ffMemApp() {
     if (root.querySelector(".el-select, .el-select-v2")) return "select";
     if (root.querySelector(".el-radio-group, .el-radio, .el-radio-button, .van-radio-group, .van-radio"))
       return "radio";
-    if (root.querySelector(".el-checkbox-group")) return "checkbox";
+    if (root.querySelector(".el-checkbox-group, .van-checkbox-group")) return "checkbox";
+    if (root.querySelectorAll(".el-checkbox, .el-checkbox-button, .van-checkbox").length >= 2)
+      return "checkbox";
     if (root.querySelector(".el-switch")) return "switch";
     if (root.querySelector(".el-rate")) return "rate";
     if (root.querySelector(".el-slider")) return "slider";
     return dateEditorType(root);
+  }
+
+  function isMultipleWidget(root) {
+    if (!root || !root.querySelector) return false;
+    if (root.querySelector(".el-checkbox-group, .van-checkbox-group, .el-select--multiple"))
+      return true;
+    if (root.querySelectorAll(".el-checkbox, .el-checkbox-button, .van-checkbox").length >= 2)
+      return true;
+    const sel = root.querySelector(".el-select, .el-cascader, .el-tree-select, .el-select-v2");
+    if (!sel) return false;
+    let inst = sel.__vueParentComponent;
+    for (let i = 0; inst && i < 12; i++, inst = inst.parent) {
+      const p = inst.props || {};
+      if (p.multiple) return true;
+      const n = inst.type?.name || inst.type?.__name || "";
+      if (/Select|Cascader/i.test(n)) return !!p.multiple;
+    }
+    return false;
   }
 
   function optionList(v) {
@@ -2034,7 +2059,9 @@ function ffMemApp() {
     if (!item) return [];
     const sel =
       item.querySelector &&
-      item.querySelector(".el-select, .el-cascader, .el-tree-select, .el-radio-group, .el-select-v2");
+      item.querySelector(
+        ".el-select, .el-cascader, .el-tree-select, .el-radio-group, .el-checkbox-group, .el-select-v2"
+      );
     let inst = (sel || item).__vueParentComponent;
     for (let i = 0; inst && i < 18; i++, inst = inst.parent) {
       const n = inst.type?.name || inst.type?.__name || "";
@@ -2080,6 +2107,7 @@ function ffMemApp() {
           label: label || item.label,
           type,
           options: item.options || item.dicData || item.data,
+          multiple: !!(item.multiple || (item.props && item.props.multiple)),
         });
       walkSchema(item.schema, out);
       walkSchema(item.children, out);
@@ -2117,6 +2145,7 @@ function ffMemApp() {
         label: m.label || prev.label,
         placeholder: m.placeholder || prev.placeholder,
         options: mergeOpts(m.options, prev.options),
+        multiple: !!(m.multiple || prev.multiple),
         valueFormat: m.valueFormat || m["value-format"] || prev.valueFormat,
         isRange: m.isRange || m["is-range"] || prev.isRange,
         startPlaceholder: m.startPlaceholder || m["start-placeholder"] || prev.startPlaceholder,
@@ -2151,6 +2180,11 @@ function ffMemApp() {
           options: optionChild
             ? [{ value: p.label != null ? p.label : p.value, label: p.label }]
             : p.options || p.dicData || (/Select|Cascader|Radio|Checkbox/i.test(cname) ? p.data : null),
+          multiple: !!(
+            p.multiple ||
+            optionChild && /Checkbox/i.test(cname) ||
+            /CheckboxGroup/i.test(cname)
+          ),
           valueFormat: p.valueFormat || p["value-format"],
           isRange: p.isRange || p["is-range"],
           startPlaceholder: p.startPlaceholder || p["start-placeholder"],
@@ -2177,6 +2211,7 @@ function ffMemApp() {
             (control?.tagName === "TEXTAREA" ? "textarea" : control?.type),
           placeholder: control?.placeholder,
           options: harvestOptions(item),
+          multiple: isMultipleWidget(item) || widgetType(item) === "checkbox",
         });
     });
     return [...map.values()];
@@ -2202,6 +2237,7 @@ function ffMemApp() {
         label,
         placeholder: el.placeholder,
         options: harvestOptions(wrap),
+        multiple: isMultipleWidget(wrap) || widgetType(wrap) === "checkbox",
       });
     });
     return metas;
@@ -2252,7 +2288,7 @@ function ffMemApp() {
     if (t === "switch") return "switch";
     if (t === "rate") return "rate";
     if (t === "slider") return "slider";
-    if (t === "checkbox") return "options-multi";
+    if (t === "checkbox" || t === "checkboxgroup" || meta.multiple) return "options-multi";
     if (
       t === "radio" ||
       t === "select" ||
@@ -2262,7 +2298,7 @@ function ffMemApp() {
       t === "selectv2"
     )
       return "option";
-    if (optionsOf(meta).length) return t === "checkbox" ? "options-multi" : "option";
+    if (optionsOf(meta).length) return t === "checkbox" || t === "checkboxgroup" ? "options-multi" : "option";
     if (t === "textarea") return "remark";
     if (t === "digit" || t === "number" || t === "input-number") {
       return /金额|价格|费用|amount|price|money|fee/.test(s) ? "amount" : "number";
@@ -2539,8 +2575,10 @@ function ffMemApp() {
       return firstOption(meta);
     }
     if (kind === "options-multi") {
-      const v = firstOption(meta);
-      return v == null ? undefined : [v];
+      const list = optionsOf(meta);
+      if (!list.length) return undefined;
+      const n = list.length >= 2 ? 2 : 1;
+      return list.slice(0, n).map(optVal);
     }
   }
 
