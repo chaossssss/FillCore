@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         填核 HEX
-// @version      1.10.0
+// @version      1.11.0
 // @match        http://192.168.120.228/*
 // @match        http://192.168.100.156/*
 // @grant        GM_getValue
@@ -8,6 +8,8 @@
 // @grant        GM_deleteValue
 // @grant        GM_listValues
 // @grant        GM_addElement
+// @grant        GM_xmlhttpRequest
+// @connect      *
 // @inject-into  content
 // @run-at       document-start
 // ==/UserScript==
@@ -15,7 +17,7 @@
 function ffMemApp() {
   "use strict";
 
-  const VERSION = "1.10.0";
+  const VERSION = "1.11.0";
   const MAX_HIST = 30;
   const MAX_IDS = 36;
   const MAX_NET = 40;
@@ -35,6 +37,8 @@ function ffMemApp() {
   const idGroupLastKey = "ff_mem_id_group_last";
   const pendingKey = "ff_mem_pending_login";
   const lastIdKey = "ff_mem_last_id";
+  const aiCfgKey = "ff_mem_ai_cfg";
+  const aiCacheKey = "ff_mem_ai_cache";
 
   function gmPing(op, key, val) {
     try {
@@ -812,6 +816,7 @@ function ffMemApp() {
     #ff-hud.open .menu button:nth-child(8) { animation-delay: .70s; }
     #ff-hud.open .menu button:nth-child(9) { animation-delay: .76s; }
     #ff-hud.open .menu button:nth-child(10) { animation-delay: .82s; }
+    #ff-hud.open .menu button:nth-child(11) { animation-delay: .88s; }
     @keyframes ffin {
       from { opacity: 0; filter: blur(8px); }
       to { opacity: 1; filter: none; }
@@ -853,6 +858,9 @@ function ffMemApp() {
     #ff-hud .menu button[data-a="rec"]:hover { background: linear-gradient(90deg, #3a1018, #071820); }
     #ff-hud .menu button[data-a="rec"]::before { background: #ff6b6b; }
     #ff-hud .menu button[data-a="rec"] .idx { color: #ff6b6b; }
+    #ff-hud .menu button[data-a="ai"]:hover { background: linear-gradient(90deg, #2a1540, #071820); }
+    #ff-hud .menu button[data-a="ai"]::before { background: #c79bff; }
+    #ff-hud .menu button[data-a="ai"] .idx { color: #c79bff; }
     #ff-hud.rec .menu button[data-a="rec"] {
       border-color: #ff6b6b; box-shadow: 0 0 12px #ff6b6b44;
     }
@@ -1072,6 +1080,35 @@ function ffMemApp() {
     }
     #ff-mem-hist .dump::-webkit-scrollbar { width: 6px; height: 6px; }
     #ff-mem-hist .dump::-webkit-scrollbar-thumb { background: #2ee6ff55; }
+    #ff-mem-hist .ai-box {
+      border: 1px solid #1a4a58; background: #071820cc;
+      padding: 10px; margin-bottom: 8px;
+      clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
+    }
+    #ff-mem-hist .ai-lg {
+      display: grid; grid-template-columns: 70px 1fr;
+      gap: 7px; align-items: center; margin-bottom: 7px;
+    }
+    #ff-mem-hist .ai-lg > span {
+      color: #4a8890; font: 11px "Microsoft YaHei", sans-serif; letter-spacing: 1px;
+    }
+    #ff-mem-hist .ai-lg input, #ff-mem-hist .ai-txt {
+      width: 100%; box-sizing: border-box;
+      background: #040c12; border: 1px solid #1d4a55; color: #bff6ff;
+      padding: 5px 7px; outline: none; border-radius: 0;
+      font: 12px "Microsoft YaHei", sans-serif;
+    }
+    #ff-mem-hist .ai-lg input:focus, #ff-mem-hist .ai-txt:focus { border-color: #7af6ff; }
+    #ff-mem-hist .ai-txt { height: 64px; resize: vertical; line-height: 1.5; }
+    #ff-mem-hist .ai-row {
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px;
+    }
+    #ff-mem-hist .ai-sw {
+      display: inline-flex; align-items: center; gap: 4px;
+      color: #7a9aa8; font: 11px "Microsoft YaHei", sans-serif; cursor: pointer;
+    }
+    #ff-mem-hist .ai-sw input { accent-color: #2ee6ff; }
+    #ff-mem-hist .ai-note { color: #4a8890; font: 11px/1.6 "Microsoft YaHei", sans-serif; margin-top: 7px; }
 
     #ff-mem-pick {
       display: none; position: fixed; z-index: 2147483647;
@@ -2607,11 +2644,521 @@ function ffMemApp() {
     return data;
   }
 
+  // ---------- AI 接入（OpenAI 兼容接口） ----------
+
+  function aiCfg() {
+    let raw = {};
+    try {
+      raw = JSON.parse(storeGet(aiCfgKey) || "{}") || {};
+    } catch {
+      raw = {};
+    }
+    const timeout = Number(raw.timeout) || 60000;
+    return {
+      base: String(raw.base || "").trim(),
+      model: String(raw.model || "").trim(),
+      key: String(raw.key || "").trim(),
+      mock: raw.mock !== false,
+      nl: raw.nl !== false,
+      map: raw.map !== false,
+      timeout: Math.min(180000, Math.max(8000, timeout)),
+    };
+  }
+
+  function aiReady() {
+    const c = aiCfg();
+    return !!(c.base && c.model);
+  }
+
+  function aiSave(patch) {
+    storeSet(aiCfgKey, JSON.stringify({ ...aiCfg(), ...patch }));
+  }
+
+  function aiCacheGet(key) {
+    try {
+      const m = JSON.parse(storeGet(aiCacheKey) || "{}") || {};
+      return m[key];
+    } catch {
+      return undefined;
+    }
+  }
+
+  function aiCacheSet(key, val) {
+    let m = {};
+    try {
+      m = JSON.parse(storeGet(aiCacheKey) || "{}") || {};
+    } catch {
+      m = {};
+    }
+    m[key] = val;
+    const keys = Object.keys(m);
+    if (keys.length > 300) delete m[keys[0]];
+    storeSet(aiCacheKey, JSON.stringify(m));
+  }
+
+  function aiCacheClear() {
+    storeDel(aiCacheKey);
+  }
+
+  function aiHash(s) {
+    let h = 0;
+    const t = String(s || "");
+    for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0;
+    return (h >>> 0).toString(36);
+  }
+
+  // 页面上下文里没有 GM_*，走 postMessage 让油猴沙箱代发；不给回执就退回 fetch。
+  let aiSeq = 0;
+  const aiPending = new Map();
+
+  function aiSettle(p, ok, d) {
+    if (p.done) return;
+    p.done = true;
+    aiPending.delete(p.id);
+    clearTimeout(p.timer);
+    clearTimeout(p.ackTimer);
+    if (ok) p.resolve({ status: d.status, text: d.text || "" });
+    else p.reject(new Error(d.error || "AI 请求失败"));
+  }
+
+  window.addEventListener("message", (e) => {
+    const d = e.data;
+    if (!d || d.ns !== "ff-mem-gm-reply") return;
+    const p = aiPending.get(d.id);
+    if (!p) return;
+    if (d.ack) {
+      p.ack = true;
+      return;
+    }
+    aiSettle(p, !!d.ok, d);
+  });
+
+  function aiPost(url, headers, body, timeout) {
+    return new Promise((resolve, reject) => {
+      const id = "ai_" + Date.now() + "_" + ++aiSeq;
+      const p = { id, resolve, reject, ack: false, done: false };
+      const fromFetch = () => {
+        if (p.ack || p.done) return;
+        fetch(url, { method: "POST", headers, body })
+          .then((r) =>
+            r.text().then((t) => {
+              if (r.ok) aiSettle(p, true, { status: r.status, text: t });
+              else aiSettle(p, false, { error: "HTTP " + r.status + " " + t.slice(0, 120) });
+            })
+          )
+          .catch((err) =>
+            aiSettle(p, false, {
+              error: "页面直连失败：" + (err && err.message ? err.message : err),
+            })
+          );
+      };
+      p.ackTimer = setTimeout(fromFetch, 900);
+      p.timer = setTimeout(() => aiSettle(p, false, { error: "AI 超时" }), timeout + 1500);
+      aiPending.set(id, p);
+      try {
+        window.postMessage({ ns: "ff-mem-gm", op: "ai", id, url, headers, body, timeout }, "*");
+      } catch (err) {
+        aiSettle(p, false, { error: String(err) });
+      }
+    });
+  }
+
+  async function aiChat(messages, maxTokens) {
+    const c = aiCfg();
+    if (!c.base || !c.model) throw new Error("还没配 AI 服务");
+    const base = c.base.replace(/\/+$/, "");
+    const url = /\/chat\/completions$/.test(base) ? base : base + "/chat/completions";
+    const headers = { "Content-Type": "application/json", Accept: "application/json" };
+    if (c.key) headers.Authorization = "Bearer " + c.key;
+    const body = JSON.stringify({
+      model: c.model,
+      messages,
+      temperature: 0.4,
+      max_tokens: maxTokens || 1000,
+      stream: false,
+    });
+    const res = await aiPost(url, headers, body, c.timeout);
+    if (res.status >= 400)
+      throw new Error("HTTP " + res.status + " " + String(res.text || "").slice(0, 120));
+    const data = tryJson(res.text);
+    const text = data?.choices?.[0]?.message?.content;
+    if (!text) {
+      const msg = data?.error?.message || data?.message || String(res.text || "").slice(0, 120);
+      throw new Error(msg || "返回里没有内容");
+    }
+    return typeof text === "string" ? text : JSON.stringify(text);
+  }
+
+  function aiJson(text) {
+    let s = String(text || "").trim();
+    s = s.replace(/^```[a-zA-Z]*\s*/, "").replace(/```\s*$/, "").trim();
+    const a = s.indexOf("{");
+    const b = s.lastIndexOf("}");
+    if (a >= 0 && b > a) s = s.slice(a, b + 1);
+    try {
+      return JSON.parse(s);
+    } catch {
+      return null;
+    }
+  }
+
+  function aiEligible(meta) {
+    const s = textOf(meta).toLowerCase();
+    if (/密码|password|验证码|captcha|短信|sms|上传|upload/.test(s)) return false;
+    const t = String(meta.type || "").toLowerCase();
+    if (["password", "file", "image", "hidden", "submit", "button"].includes(t)) return false;
+    return true;
+  }
+
+  function aiFieldTag(f) {
+    return "mock|" + location.pathname + "|" + f.name + "|" + (f.label || "");
+  }
+
+  // 给规则猜不出语义的字段要值
+  async function aiMockValues(fields) {
+    const out = [];
+    const ask = [];
+    fields.forEach((f) => {
+      const ck = aiFieldTag(f);
+      const cached = aiCacheGet(ck);
+      if (cached !== undefined && cached !== "") out.push({ ...f, value: cached });
+      else ask.push({ ...f, ck });
+    });
+    if (!ask.length) return out;
+    const batch = ask.slice(0, 40);
+    const user = [
+      "页面：" + (document.title || "") + " " + location.pathname,
+      "字段：" +
+        JSON.stringify(
+          batch.map((f) => ({
+            name: f.name,
+            label: f.label || "",
+            type: f.type || "",
+            placeholder: f.placeholder || "",
+          }))
+        ),
+      '返回格式：{"values":[{"name":"字段name","value":"值"}]}',
+      "要求：每个字段都返回；值用字符串或数字；语义不明就给通用业务值；不要密码、验证码。",
+    ].join("\n");
+    const text = await aiChat(
+      [
+        {
+          role: "system",
+          content:
+            "你是内网业务系统的造数助手。根据字段名、标签和类型，为每个字段生成一条真实合理的中文测试数据。只输出 JSON，不要解释。",
+        },
+        { role: "user", content: user },
+      ],
+      1400
+    );
+    const data = aiJson(text);
+    const list = Array.isArray(data?.values) ? data.values : [];
+    const byName = new Map(list.map((x) => [String(x.name), x.value]));
+    batch.forEach((f) => {
+      const v = byName.get(f.name);
+      if (v == null || v === "") return;
+      aiCacheSet(f.ck, v);
+      out.push({ ...f, value: v });
+    });
+    return out;
+  }
+
+  // 当前页字段清单（给自然语言 / 接口映射用）
+  function aiFormFields() {
+    const forms = currentForms();
+    const index = new Map();
+    const fields = [];
+    forms.forEach((f, i) => {
+      const metas = f.kind === "native" ? metasNative() : metasInside(f.el);
+      const cur = f.get() || {};
+      metas.forEach((m) => {
+        if (junkField(m.name) || !aiEligible(m)) return;
+        const item = {
+          name: m.name,
+          label: m.label || "",
+          type: m.type || "",
+          filled: !isEmpty(cur[m.name]),
+        };
+        const opts = optionsOf(m);
+        if (opts.length) {
+          item.options = opts.slice(0, 12).map((o) => ({
+            v: optVal(o),
+            l: String(o.label ?? o.text ?? optVal(o)),
+          }));
+        }
+        fields.push(item);
+        index.set(m.name, { formIndex: i, label: m.label || m.name });
+      });
+    });
+    return { fields: fields.slice(0, 60), index };
+  }
+
+  function aiPlanEntries(values, index) {
+    const entries = [];
+    (Array.isArray(values) ? values : []).forEach((x) => {
+      if (!x || x.name == null) return;
+      const hit = index.get(String(x.name));
+      if (!hit) return;
+      if (x.value == null || x.value === "") return;
+      entries.push({
+        formIndex: hit.formIndex,
+        key: String(x.name),
+        label: hit.label,
+        value: x.value,
+        checked: true,
+      });
+    });
+    return entries;
+  }
+
+  async function aiPlanFill(text) {
+    const instr = String(text || "").trim();
+    if (!instr) return toast("先写一句指令");
+    if (!aiReady()) return togglePanel("ai");
+    const { fields, index } = aiFormFields();
+    if (!fields.length) return toast("没识别到可填字段");
+    toast("AI 生成方案中…", 4000);
+    let data;
+    try {
+      const out = await aiChat(
+        [
+          {
+            role: "system",
+            content:
+              "你是内网测试系统的填表助手。按用户指令为表单字段生成值，只输出 JSON，不要解释。",
+          },
+          {
+            role: "user",
+            content: [
+              "页面：" + (document.title || "") + " " + location.pathname,
+              "表单字段：" + JSON.stringify(fields),
+              "用户指令：" + instr,
+              '返回格式：{"values":[{"name":"字段name","value":值}]}',
+              "要求：只返回指令涉及的字段；下拉字段必须从 options 里选 v；日期用 YYYY-MM-DD 或 YYYY-MM-DD HH:mm:ss；数值字段返回数字；不要编造密码、验证码。",
+            ].join("\n"),
+          },
+        ],
+        1600
+      );
+      data = aiJson(out);
+    } catch (err) {
+      return toast("AI 失败：" + (err.message || err), 4200);
+    }
+    const entries = aiPlanEntries(data?.values, index);
+    if (!entries.length) return toast("AI 没给出可用字段");
+    openPick({
+      title: "AI 方案",
+      entries,
+      skip: 0,
+      confirmText: "写入",
+      onConfirm: (picked) => commitEntries(picked, "AI", 0),
+    });
+  }
+
+  function flatScalars(obj, prefix, out, depth) {
+    if (out.length >= 90 || obj == null) return out;
+    if (Array.isArray(obj)) {
+      obj.slice(0, 3).forEach((v, i) =>
+        flatScalars(v, prefix ? prefix + "[" + i + "]" : "[" + i + "]", out, depth + 1)
+      );
+      return out;
+    }
+    if (typeof obj !== "object") {
+      if (prefix) out.push({ path: prefix, value: obj });
+      return out;
+    }
+    Object.keys(obj)
+      .slice(0, 40)
+      .forEach((k) => {
+        const v = obj[k];
+        const p = prefix ? prefix + "." + k : k;
+        if (v != null && typeof v === "object") {
+          if (depth < 2) flatScalars(v, p, out, depth + 1);
+        } else if (p) {
+          out.push({ path: p, value: v });
+        }
+      });
+    return out;
+  }
+
+  function pathVal(obj, path) {
+    const segs = String(path || "")
+      .replace(/\[(\d+)\]/g, ".$1")
+      .split(".")
+      .filter(Boolean);
+    return segs.reduce((o, k) => (o == null ? undefined : o[k]), obj);
+  }
+
+  function aiNormObj(v) {
+    if (v == null) return null;
+    if (typeof v === "string") {
+      const parsed = tryJson(v);
+      return parsed == null ? v : parsed;
+    }
+    return v;
+  }
+
+  async function aiMapFill(rec) {
+    if (!aiReady()) return togglePanel("ai");
+    if (aiCfg().map === false) return toast("接口映射已关闭");
+    const resObj = aiNormObj(rec.resJson != null ? rec.resJson : rec.resText);
+    const reqObj = aiNormObj(rec.reqJson != null ? rec.reqJson : rec.reqText);
+    const resFlat = flatScalars(resObj, "res", [], 0);
+    const reqFlat = flatScalars(reqObj, "req", [], 0);
+    const flat = resFlat.concat(reqFlat);
+    if (!flat.length) return toast("这条里没有可映射的标量字段");
+    const { fields, index } = aiFormFields();
+    if (!fields.length) return toast("当前页没有可填表单");
+    const sig =
+      "map|" + location.pathname + "|" +
+      aiHash(fields.map((f) => f.name).join(",") + "|" + flat.map((f) => f.path).join(","));
+    let mapping = aiCacheGet(sig);
+    if (!mapping || typeof mapping !== "object") {
+      toast("AI 映射中…", 4000);
+      const slim = flat.slice(0, 70).map((f) => ({
+        path: f.path,
+        sample: String(f.value).slice(0, 40),
+      }));
+      try {
+        const out = await aiChat(
+          [
+            {
+              role: "system",
+              content:
+                "你是接口字段与表单字段的映射助手。只输出 JSON，不要解释；拿不准的字段不要输出。",
+            },
+            {
+              role: "user",
+              content: [
+                "接口字段：" + JSON.stringify(slim),
+                "表单字段：" + JSON.stringify(fields),
+                '返回格式：{"map":{"表单字段name":"接口字段path"}}',
+                "要求：只映射语义明确、类型匹配的字段；path 必须原样来自接口字段；没有合适的就不写。",
+              ].join("\n"),
+            },
+          ],
+          1200
+        );
+        const data = aiJson(out);
+        mapping = data && data.map && typeof data.map === "object" ? data.map : null;
+      } catch (err) {
+        return toast("AI 失败：" + (err.message || err), 4200);
+      }
+      if (!mapping || !Object.keys(mapping).length) return toast("AI 没找到可映射的字段");
+      aiCacheSet(sig, mapping);
+    }
+    const entries = [];
+    const readPath = (path) => {
+      const p = String(path || "");
+      if (p === "res" || p.startsWith("res.")) return pathVal(resObj, p.slice(3));
+      if (p === "req" || p.startsWith("req.")) return pathVal(reqObj, p.slice(3));
+      const a = pathVal(resObj, p);
+      return a !== undefined ? a : pathVal(reqObj, p);
+    };
+    Object.entries(mapping).forEach(([formName, path]) => {
+      const hit = index.get(formName);
+      if (!hit) return;
+      const val = readPath(path);
+      if (val == null || val === "" || typeof val === "object") return;
+      entries.push({
+        formIndex: hit.formIndex,
+        key: formName,
+        label: hit.label,
+        value: val,
+        checked: true,
+      });
+    });
+    if (!entries.length) return toast("映射到了，但接口里没有对应值");
+    openPick({
+      title: "AI 映射",
+      entries,
+      skip: 0,
+      confirmText: "写入",
+      onConfirm: (picked) => commitEntries(picked, "AI 映射", 0),
+    });
+  }
+
+  async function aiMockOne(field) {
+    if (!aiReady()) return togglePanel("ai");
+    const forms = currentForms();
+    const f = forms.find((x) => x.el && field.host && x.el.contains(field.host)) || forms[0];
+    if (!f) return toast("没有找到表单");
+    const metas = f.kind === "native" ? metasNative() : metasInside(f.el);
+    const meta = metas.find((m) => m.name === field.name) || {
+      name: field.name,
+      label: field.label,
+      type: field.host?.type,
+    };
+    if (!aiEligible(meta)) return toast("这个字段不适合 AI 造数");
+    toast("AI 生成中…", 3000);
+    let got;
+    try {
+      got = await aiMockValues([
+        {
+          formIndex: 0,
+          name: meta.name,
+          label: meta.label || field.label || "",
+          type: meta.type || "",
+          placeholder: meta.placeholder || "",
+        },
+      ]);
+    } catch (err) {
+      return toast("AI 失败：" + (err.message || err), 4200);
+    }
+    const v = got[0]?.value;
+    if (v == null || v === "") return toast("AI 没给值");
+    const patches = forms.map((x) => (x === f ? { [field.name]: v } : {}));
+    const stat = await applyMerge(patches);
+    toastStats("AI「" + (field.label || field.name) + "」", stat);
+  }
+
+  async function aiTest() {
+    if (!aiReady()) return toast("先填服务地址和模型");
+    const t0 = Date.now();
+    try {
+      await aiChat([{ role: "user", content: "只回复两个字：可用" }], 20);
+      toast("AI 连通 · " + (Date.now() - t0) + "ms");
+      return true;
+    } catch (err) {
+      toast("AI 连接失败：" + (err.message || err), 4200);
+      return false;
+    }
+  }
+
+  async function commitEntries(picked, head, skip) {
+    const dataAll = {};
+    picked
+      .filter((e) => e.checked && !junkField(e.key))
+      .forEach((e) => {
+        dataAll[e.key] = e.value;
+      });
+    const forms = currentForms();
+    const patches = forms.map((_, i) => {
+      const data = {};
+      picked
+        .filter((e) => e.checked && e.formIndex === i && !junkField(e.key))
+        .forEach((e) => (data[e.key] = e.value));
+      return data;
+    });
+    const overlayIdx = forms.findIndex((f) => inOpenOverlay(f.el));
+    if (overlayIdx >= 0) patches[overlayIdx] = { ...patches[overlayIdx], ...dataAll };
+    const unchecked = picked.filter((e) => !e.checked).length;
+    const stat = await applyMerge(patches);
+    const boost = await runBoost();
+    toastStats(head, {
+      ok: stat.ok + boost.ok,
+      fail: stat.fail + boost.fail,
+      skip: (skip || 0) + unchecked,
+      link: boost.n,
+    });
+  }
+
   function planVirtual() {
     resetHainingCtx();
     const forms = currentForms();
     let skip = 0;
-    const planned = forms.map((f) => {
+    const aiList = [];
+    const planned = forms.map((f, fi) => {
       const current = f.get();
       const metas = f.kind === "native" ? metasNative() : metasInside(f.el);
       const rows = [];
@@ -2619,7 +3166,18 @@ function ffMemApp() {
       metas.forEach((meta) => {
         if (junkField(meta.name)) return;
         const kind = inferKind(meta);
-        if (!kind) return;
+        if (!kind) {
+          // 规则猜不出语义的空字段，留给 AI（密码、上传这类不参与）
+          if (isEmpty(current[meta.name]) && aiEligible(meta))
+            aiList.push({
+              formIndex: fi,
+              name: meta.name,
+              label: meta.label || "",
+              type: meta.type || "",
+              placeholder: meta.placeholder || "",
+            });
+          return;
+        }
         if (!isEmpty(current[meta.name])) {
           skip++;
           return;
@@ -2641,7 +3199,7 @@ function ffMemApp() {
       return { current, mock, rows, set: f.set, kind: f.kind };
     });
     planned.forEach((p, i) => p.rows.forEach((r) => (r.formIndex = i)));
-    return { planned, skip, engine: forms[0]?.kind };
+    return { planned, skip, aiList, engine: forms[0]?.kind };
   }
 
   function actionScope() {
@@ -2826,7 +3384,29 @@ function ffMemApp() {
   }
 
   async function virtualFill() {
-    const { planned, skip } = planVirtual();
+    const { planned, skip, aiList } = planVirtual();
+    let aiN = 0;
+    if (aiList.length && aiCfg().mock && aiReady()) {
+      toast("AI 补造 " + aiList.length + " 个字段…", 5000);
+      try {
+        const got = await aiMockValues(aiList);
+        got.forEach((f) => {
+          const p = planned[f.formIndex];
+          if (!p) return;
+          p.rows.push({
+            formIndex: f.formIndex,
+            key: f.name,
+            label: f.label || f.name,
+            value: f.value,
+            checked: true,
+          });
+          p.mock[f.name] = f.value;
+          aiN++;
+        });
+      } catch (err) {
+        toast("AI 造数失败：" + (err.message || err), 4200);
+      }
+    }
     const entries = planned.flatMap((p) => p.rows);
     if (!entries.length) {
       const boost = await runBoost();
@@ -2835,35 +3415,11 @@ function ffMemApp() {
       return toast(skip ? "空字段里没有可虚拟的项" : "没有识别到可填的空字段");
     }
     openPick({
-      title: "虚拟预览",
+      title: aiN ? "虚拟预览 · AI " + aiN : "虚拟预览",
       entries,
       skip,
       confirmText: "写入",
-      onConfirm: async (picked) => {
-        const dataAll = {};
-        picked.filter((e) => e.checked && !junkField(e.key)).forEach((e) => {
-          dataAll[e.key] = e.value;
-        });
-        const forms = currentForms();
-        const patches = forms.map((_, i) => {
-          const data = {};
-          picked
-            .filter((e) => e.checked && e.formIndex === i && !junkField(e.key))
-            .forEach((e) => (data[e.key] = e.value));
-          return data;
-        });
-        const overlayIdx = forms.findIndex((f) => inOpenOverlay(f.el));
-        if (overlayIdx >= 0) patches[overlayIdx] = { ...patches[overlayIdx], ...dataAll };
-        const unchecked = picked.filter((e) => !e.checked).length;
-        const stat = await applyMerge(patches);
-        const boost = await runBoost();
-        toastStats("虚拟", {
-          ok: stat.ok + boost.ok,
-          fail: stat.fail + boost.fail,
-          skip: skip + unchecked,
-          link: boost.n,
-        });
-      },
+      onConfirm: (picked) => commitEntries(picked, "虚拟", skip),
     });
   }
 
@@ -3137,7 +3693,8 @@ function ffMemApp() {
   ctx.style.display = "none";
   ctx.innerHTML =
     '<button type="button" data-a="mock1">虚拟此字段</button>' +
-    '<button type="button" data-a="fill1">回填此字段</button>';
+    '<button type="button" data-a="fill1">回填此字段</button>' +
+    '<button type="button" data-a="aimock1">AI 造此字段</button>';
 
   function hidePick() {
     pickEl.style.display = "none";
@@ -3348,6 +3905,10 @@ function ffMemApp() {
     togglePanel("rec");
   }
 
+  function toggleAiPanel() {
+    togglePanel("ai");
+  }
+
   function togglePanel(mode) {
     const open = panel.style.display !== "block" || panelMode !== mode;
     if (!open) {
@@ -3363,9 +3924,86 @@ function ffMemApp() {
     if (mode === "id") renderIds();
     else if (mode === "net") renderNet();
     else if (mode === "rec") renderRec();
+    else if (mode === "ai") renderAi();
     else renderHist();
     placePanel();
     if (mode === "hist" || mode === "net") panel.querySelector(".find input")?.focus();
+  }
+
+  function aiReadPanel() {
+    const q = (s) => panel.querySelector(s);
+    const patch = {
+      base: q("#ai-base") ? q("#ai-base").value.trim() : "",
+      model: q("#ai-model") ? q("#ai-model").value.trim() : "",
+      key: q("#ai-key") ? q("#ai-key").value.trim() : "",
+      mock: !!(q("#ai-sw-mock") && q("#ai-sw-mock").checked),
+      nl: !!(q("#ai-sw-nl") && q("#ai-sw-nl").checked),
+      map: !!(q("#ai-sw-map") && q("#ai-sw-map").checked),
+    };
+    aiSave(patch);
+    return aiCfg();
+  }
+
+  function renderAi() {
+    if (panel.style.display !== "block" || panelMode !== "ai") return;
+    const c = aiCfg();
+    panel.innerHTML =
+      '<div class="scan"></div><div class="hd"><span class="mark"></span><span class="ttl">AI 接入</span>' +
+      '<span class="cnt">' + (aiReady() ? "READY" : "OFF") + "</span>" +
+      '<button type="button" class="wipe" title="清掉 AI 造数与映射缓存">清缓存</button>' +
+      '<button type="button" class="x" title="关闭">✕</button></div>' +
+      '<div class="bd">' +
+      '<div class="ai-box">' +
+      '<div class="ai-lg"><span>服务地址</span><input id="ai-base" spellcheck="false" placeholder="https://api.deepseek.com/v1"></div>' +
+      '<div class="ai-lg"><span>模型</span><input id="ai-model" spellcheck="false" placeholder="deepseek-chat"></div>' +
+      '<div class="ai-lg"><span>API Key</span><input id="ai-key" type="password" spellcheck="false" placeholder="sk-..."></div>' +
+      '<div class="ai-row">' +
+      '<label class="ai-sw"><input type="checkbox" id="ai-sw-mock">智能造数</label>' +
+      '<label class="ai-sw"><input type="checkbox" id="ai-sw-nl">自然语言</label>' +
+      '<label class="ai-sw"><input type="checkbox" id="ai-sw-map">接口映射</label>' +
+      '<button type="button" class="op go" id="ai-save">保存</button>' +
+      '<button type="button" class="op" id="ai-test">测试</button>' +
+      "</div>" +
+      '<div class="ai-note">OpenAI 兼容接口，地址填到 /v1。Key 只存本机油猴；请求由油猴代发，绕开跨域。不配也能用原来的规则造数。</div>' +
+      "</div>" +
+      '<div class="ai-box">' +
+      '<div class="ai-lg"><span>指令</span><textarea class="ai-txt" id="ai-nl" spellcheck="false" placeholder="例：填成海宁监控项目的测试客户，联系人张三，手机 13800138000"></textarea></div>' +
+      '<div class="ai-row"><button type="button" class="op go" id="ai-run">生成填充方案</button>' +
+      '<span class="ai-note">生成后先预览，确认再写入 · Ctrl+Enter</span></div>' +
+      "</div>" +
+      "</div>";
+    const q = (s) => panel.querySelector(s);
+    q(".x").onclick = closePanel;
+    q(".wipe").onclick = () => {
+      aiCacheClear();
+      toast("已清 AI 缓存");
+    };
+    q("#ai-base").value = c.base;
+    q("#ai-model").value = c.model;
+    q("#ai-key").value = c.key;
+    q("#ai-sw-mock").checked = c.mock;
+    q("#ai-sw-nl").checked = c.nl;
+    q("#ai-sw-map").checked = c.map;
+    q("#ai-save").onclick = () => {
+      const n = aiReadPanel();
+      toast(n.base && n.model ? "AI 配置已保存" : "已保存，还缺地址或模型");
+      renderAi();
+    };
+    q("#ai-test").onclick = async () => {
+      aiReadPanel();
+      await aiTest();
+    };
+    const run = () => {
+      aiReadPanel();
+      aiPlanFill(q("#ai-nl").value);
+    };
+    q("#ai-run").onclick = run;
+    q("#ai-nl").addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        run();
+      }
+    });
   }
 
   function copyText(text, ok) {
@@ -3532,6 +4170,7 @@ function ffMemApp() {
         ["cURL", () => copyText(buildCurl(rec), "已复制 cURL"), ""],
         ["写入", () => writeNetReq(rec), "go"],
         ["响应", () => writeNetRes(rec), ""],
+        ["AI", () => aiMapFill(rec), ""],
       ].forEach(([text, fn, cls]) => {
         const b = document.createElement("button");
         b.className = "op " + cls;
@@ -4538,8 +5177,9 @@ function ffMemApp() {
     '<button type="button" data-a="purge" title="Alt+R 清空缓存并重置 token"><span class="idx">08</span><span class="lab">重置</span><span class="en">PURGE</span></button>' +
     '<button type="button" data-a="net" title="Alt+N 请求抓包"><span class="idx">09</span><span class="lab">抓包</span><span class="en">NET</span></button>' +
     '<button type="button" data-a="rec" title="Alt+E 录制复现 · Shift+点击打开列表"><span class="idx">10</span><span class="lab">录制</span><span class="en">REC</span></button>' +
+    '<button type="button" data-a="ai" title="Alt+A AI 接入 · 智能造数 / 自然语言 / 接口映射"><span class="idx">11</span><span class="lab">AI</span><span class="en">AI</span></button>' +
     "</div>" +
-    '<div class="hint">ALT+S/F/V/U/R/N/E · DRAG</div></div>';
+    '<div class="hint">ALT+S/F/V/U/R/N/E/A · DRAG</div></div>';
 
   const core = hud.querySelector(".core");
   hud.querySelector(".menu").addEventListener("click", (e) => {
@@ -4552,6 +5192,7 @@ function ffMemApp() {
     if (a === "purge") purgeSite();
     if (a === "net") toggleNet();
     if (a === "rec") e.shiftKey ? toggleRecPanel() : recToggle();
+    if (a === "ai") toggleAiPanel();
     if (a === "copy") copyLatest();
     if (a === "imp") imp();
   });
@@ -4781,6 +5422,7 @@ function ffMemApp() {
     if (!field) return;
     if (a === "mock1") mockOne(field);
     if (a === "fill1") fillOne(field);
+    if (a === "aimock1") aiMockOne(field);
   });
 
   document.addEventListener(
@@ -4792,7 +5434,7 @@ function ffMemApp() {
       ctx._field = field;
       ctx.style.display = "block";
       ctx.style.left = Math.min(e.clientX, window.innerWidth - 168) + "px";
-      ctx.style.top = Math.min(e.clientY, window.innerHeight - 90) + "px";
+      ctx.style.top = Math.min(e.clientY, window.innerHeight - 118) + "px";
     },
     true
   );
@@ -4962,6 +5604,9 @@ function ffMemApp() {
       e.preventDefault();
       if (e.shiftKey) toggleRecPanel();
       else recToggle();
+    } else if (k === "a" && !e.shiftKey) {
+      e.preventDefault();
+      toggleAiPanel();
     }
   });
 
@@ -5016,8 +5661,40 @@ function ffMemApp() {
     try {
       if (e.data.op === "set" && e.data.key) GM_setValue(e.data.key, e.data.val);
       if (e.data.op === "del" && e.data.key) GM_deleteValue(e.data.key);
+      if (e.data.op === "ai" && e.data.id) aiProxy(e.data);
     } catch (__) {}
   });
+
+  function aiReply(id, patch) {
+    try {
+      window.postMessage({ ns: "ff-mem-gm-reply", id, ...patch }, "*");
+    } catch (_) {}
+  }
+
+  // 页面里没有 GM_*，AI 请求由沙箱用 GM_xmlhttpRequest 代发，躲开跨域
+  function aiProxy(req) {
+    const id = req.id;
+    if (typeof GM_xmlhttpRequest !== "function") {
+      aiReply(id, { ok: false, error: "当前脚本管理器不支持 GM_xmlhttpRequest" });
+      return;
+    }
+    aiReply(id, { ack: true });
+    try {
+      GM_xmlhttpRequest({
+        method: "POST",
+        url: req.url,
+        headers: req.headers || {},
+        data: req.body,
+        timeout: Math.max(8000, Number(req.timeout) || 60000),
+        onload: (r) => aiReply(id, { ok: true, status: r.status, text: r.responseText }),
+        onerror: () => aiReply(id, { ok: false, error: "网络错误，确认内网能访问该域名" }),
+        ontimeout: () => aiReply(id, { ok: false, error: "请求超时" }),
+        onabort: () => aiReply(id, { ok: false, error: "请求已中止" }),
+      });
+    } catch (err) {
+      aiReply(id, { ok: false, error: String((err && err.message) || err) });
+    }
+  }
   const code = "window.__FF_MEM_INIT__=" + JSON.stringify(init) + ";(" + ffMemApp.toString() + ")();";
   try {
     if (typeof GM_addElement === "function") {
