@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         填核 HEX
-// @version      1.11.0
+// @version      1.11.1
 // @match        http://192.168.120.228/*
 // @match        http://192.168.100.156/*
 // @grant        GM_getValue
@@ -17,7 +17,7 @@
 function ffMemApp() {
   "use strict";
 
-  const VERSION = "1.11.0";
+  const VERSION = "1.11.1";
   const MAX_HIST = 30;
   const MAX_IDS = 36;
   const MAX_NET = 40;
@@ -39,6 +39,13 @@ function ffMemApp() {
   const lastIdKey = "ff_mem_last_id";
   const aiCfgKey = "ff_mem_ai_cfg";
   const aiCacheKey = "ff_mem_ai_cache";
+  // 团队默认 AI 配置：填好这三项，任何环境/浏览器首次打开都会自动带上；
+  // 本机已保存过的配置优先，填了 key 就彻底不用再手填（注意脚本会带着 Key）。
+  const AI_PRESET = {
+    base: "https://api.deepseek.com",
+    model: "deepseek-flash",
+    key: "",
+  };
 
   function gmPing(op, key, val) {
     try {
@@ -2654,10 +2661,14 @@ function ffMemApp() {
       raw = {};
     }
     const timeout = Number(raw.timeout) || 60000;
+    const pick = (k) => {
+      const saved = Object.prototype.hasOwnProperty.call(raw, k) ? String(raw[k] ?? "").trim() : "";
+      return saved || String(AI_PRESET[k] || "");
+    };
     return {
-      base: String(raw.base || "").trim(),
-      model: String(raw.model || "").trim(),
-      key: String(raw.key || "").trim(),
+      base: String(pick("base") || "").trim(),
+      model: String(pick("model") || "").trim(),
+      key: String(pick("key") || "").trim(),
       mock: raw.mock !== false,
       nl: raw.nl !== false,
       map: raw.map !== false,
@@ -2667,11 +2678,38 @@ function ffMemApp() {
 
   function aiReady() {
     const c = aiCfg();
-    return !!(c.base && c.model);
+    // 没 Key 不自动调 AI，免得每个弹窗都报 401；需要无 Key 的内网网关时随便填个占位值
+    return !!(c.base && c.model && c.key);
   }
 
   function aiSave(patch) {
     storeSet(aiCfgKey, JSON.stringify({ ...aiCfg(), ...patch }));
+  }
+
+  // 配置码：换环境/换浏览器时复制过去导入，免得重填
+  function aiCode() {
+    const c = aiCfg();
+    return JSON.stringify({ base: c.base, model: c.model, key: c.key, mock: c.mock, nl: c.nl, map: c.map });
+  }
+
+  function aiImport(code) {
+    let o;
+    try {
+      o = JSON.parse(String(code || "").trim());
+    } catch {
+      return false;
+    }
+    if (!o || typeof o !== "object") return false;
+    const patch = {};
+    ["base", "model", "key"].forEach((k) => {
+      if (typeof o[k] === "string") patch[k] = o[k].trim();
+    });
+    ["mock", "nl", "map"].forEach((k) => {
+      if (typeof o[k] === "boolean") patch[k] = o[k];
+    });
+    if (!Object.keys(patch).length) return false;
+    aiSave(patch);
+    return true;
   }
 
   function aiCacheGet(key) {
@@ -3113,7 +3151,7 @@ function ffMemApp() {
   }
 
   async function aiTest() {
-    if (!aiReady()) return toast("先填服务地址和模型");
+    if (!aiReady()) return toast("先填完整配置：地址 / 模型 / Key");
     const t0 = Date.now();
     try {
       await aiChat([{ role: "user", content: "只回复两个字：可用" }], 20);
@@ -3964,7 +4002,17 @@ function ffMemApp() {
       '<button type="button" class="op go" id="ai-save">保存</button>' +
       '<button type="button" class="op" id="ai-test">测试</button>' +
       "</div>" +
-      '<div class="ai-note">OpenAI 兼容接口，地址填到 /v1。Key 只存本机油猴；请求由油猴代发，绕开跨域。不配也能用原来的规则造数。</div>' +
+      '<div class="ai-note">' +
+      (window.__FF_MEM_INIT__
+        ? "存储：油猴，换环境自动带上 · "
+        : "存储：仅当前站点，换环境请用配置码 · ") +
+      "地址填到 /v1；Key 只存本机；请求由油猴代发，绕开跨域。不配也能用原来的规则造数。</div>" +
+      "</div>" +
+      '<div class="ai-box">' +
+      '<div class="ai-lg"><span>配置码</span><input id="ai-code" spellcheck="false" placeholder="点「复制」生成；新环境粘贴后点「导入」"></div>' +
+      '<div class="ai-row"><button type="button" class="op" id="ai-export">复制</button>' +
+      '<button type="button" class="op" id="ai-import">导入</button>' +
+      '<span class="ai-note">换环境/换浏览器时一次迁移，不用重填</span></div>' +
       "</div>" +
       '<div class="ai-box">' +
       '<div class="ai-lg"><span>指令</span><textarea class="ai-txt" id="ai-nl" spellcheck="false" placeholder="例：填成海宁监控项目的测试客户，联系人张三，手机 13800138000"></textarea></div>' +
@@ -3985,13 +4033,27 @@ function ffMemApp() {
     q("#ai-sw-nl").checked = c.nl;
     q("#ai-sw-map").checked = c.map;
     q("#ai-save").onclick = () => {
-      const n = aiReadPanel();
-      toast(n.base && n.model ? "AI 配置已保存" : "已保存，还缺地址或模型");
+      aiReadPanel();
+      toast(aiReady() ? "AI 配置已保存" : "已保存，还缺 Key 或地址");
       renderAi();
     };
     q("#ai-test").onclick = async () => {
       aiReadPanel();
       await aiTest();
+    };
+    q("#ai-export").onclick = () => {
+      const code = aiCode();
+      const box = q("#ai-code");
+      box.value = code;
+      box.select();
+      copyText(code, "配置码已复制");
+    };
+    q("#ai-import").onclick = () => {
+      const v = q("#ai-code").value.trim();
+      if (!v) return toast("先在配置码里粘贴");
+      if (!aiImport(v)) return toast("配置码格式不对");
+      toast("配置已导入");
+      renderAi();
     };
     const run = () => {
       aiReadPanel();
@@ -4008,10 +4070,29 @@ function ffMemApp() {
 
   function copyText(text, ok) {
     if (text == null || String(text) === "") return toast("没有内容");
-    navigator.clipboard.writeText(String(text)).then(
-      () => toast(ok || "已复制"),
-      () => toast("复制失败")
-    );
+    const val = String(text);
+    const done = () => toast(ok || "已复制");
+    const legacy = () => {
+      // 内网 http 页面没有 navigator.clipboard，退回 execCommand
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = val;
+        ta.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
+        document.body.appendChild(ta);
+        ta.select();
+        const hit = document.execCommand("copy");
+        ta.remove();
+        if (hit) done();
+        else toast("复制失败，请手动复制");
+      } catch (_) {
+        toast("复制失败，请手动复制");
+      }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(val).then(done, legacy);
+    } else {
+      legacy();
+    }
   }
 
   function shQuote(s) {
